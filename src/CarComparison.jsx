@@ -1,9 +1,11 @@
 import { Fragment, useMemo, useState } from "react";
 
+// ============================================================================
+// Tax model — verified 2026 NL parameters
+// ============================================================================
 const VPB_RATE = 0.19;
 const OPPORTUNITY_RATE = 0.04;
 const LOAN_RATE = 0.06;
-
 const RULING_NORM_2026 = 48013;
 
 const BOX1_BRACKETS_2026 = [
@@ -14,8 +16,7 @@ const BOX1_BRACKETS_2026 = [
 
 function box1Tax(taxable) {
   let remaining = Math.max(0, taxable);
-  let prev = 0;
-  let tax = 0;
+  let prev = 0, tax = 0;
   for (const b of BOX1_BRACKETS_2026) {
     const slice = Math.max(0, Math.min(remaining, b.upTo - prev));
     tax += slice * b.rate;
@@ -36,84 +37,60 @@ function taxableAfterRuling(salary, use30Ruling) {
 function bijtellingMarginalRate(salary, use30Ruling, annualBijtelling) {
   if (annualBijtelling <= 0) return 0;
   const taxable = taxableAfterRuling(salary, use30Ruling);
-  const before = box1Tax(taxable);
-  const after = box1Tax(taxable + annualBijtelling);
-  return (after - before) / annualBijtelling;
+  return (box1Tax(taxable + annualBijtelling) - box1Tax(taxable)) / annualBijtelling;
 }
 
+// ============================================================================
+// Catalog of fuels and ages
+// ============================================================================
 const FUELS = {
   petrol: {
-    label: "Petrol",
-    short: "Petrol",
+    label: "Petrol", short: "Petrol",
     color: "#c0392b", accent: "#e74c3c",
-    isEV: false, isPHEV: false,
-    fuelCostPer10k: 1100,
-    note: "Pure ICE — long range, simplest, but full pseudo-eindheffing exposure from 2027 (BV path).",
+    isEV: false, isPHEV: false, fuelCostPer10k: 1100,
+    note: "Pure ICE — long range, simplest. Full pseudo-eindheffing exposure from 2027 (BV path).",
   },
   hybrid: {
-    label: "Self-charging Hybrid",
-    short: "Hybrid",
+    label: "Self-charging Hybrid", short: "Hybrid",
     color: "#d35400", accent: "#e67e22",
-    isEV: false, isPHEV: false,
-    fuelCostPer10k: 850,
+    isEV: false, isPHEV: false, fuelCostPer10k: 850,
     note: "No plug. Best mixed-use balance: quiet city, fuel-efficient, highway-capable. 2027 pseudo-eindheffing applies (BV).",
   },
   phev: {
-    label: "Plug-in Hybrid (PHEV)",
-    short: "PHEV",
+    label: "Plug-in Hybrid (PHEV)", short: "PHEV",
     color: "#8e44ad", accent: "#9b59b6",
-    isEV: false, isPHEV: true,
-    fuelCostPer10k: 750,
-    note: "Heavier weight class → MRB ~25% higher than petrol from 2026 (lost ¾-rate). Same 22% bijtelling. On long highway trips you mostly run on petrol — paying for batteries you barely use.",
+    isEV: false, isPHEV: true, fuelCostPer10k: 750,
+    note: "Heavier weight class → MRB ~25% higher than petrol from 2026 (lost ¾-rate). Same 22% bijtelling. Long highway trips with full load = mostly running on petrol while carrying battery weight.",
   },
   ev: {
-    label: "EV",
-    short: "EV",
+    label: "EV", short: "EV",
     color: "#16a085", accent: "#1abc9c",
-    isEV: true, isPHEV: false,
-    fuelCostPer10k: 350,
-    note: "Cheapest per km, MRB 30% discount, exempt from 2027 pseudo-eindheffing. Long highway trips with full load = real charging-stop planning + reduced range.",
+    isEV: true, isPHEV: false, fuelCostPer10k: 350,
+    note: "Cheapest per km, MRB 30% discount, exempt from 2027 pseudo-eindheffing. Long EU trips with full family load = real charging-stop planning + 25–35% range loss.",
   },
 };
-
 const FUEL_ORDER = ["petrol", "hybrid", "phev", "ev"];
 
 const STATES = {
   used: {
-    label: "Used",
-    short: "Used",
-    sublabel: "5+ years old",
-    age: 6,
-    catalogueMultiplier: 2.0,
-    annualMaintenance: 1500,
-    resaleFraction: 0.45,
-    evRegYear: 2020,
+    label: "Used", short: "Used", sublabel: "5+ years old",
+    age: 6, catalogueMultiplier: 2.0, annualMaintenance: 1500,
+    resaleFraction: 0.45, evRegYear: 2020,
     note: "Cheap entry, but BV path inherits the original (high) catalogue value for bijtelling — the killer for old petrol cars in a BV.",
   },
   young: {
-    label: "Young Used",
-    short: "Young",
-    sublabel: "2–3 years old",
-    age: 2.5,
-    catalogueMultiplier: 1.30,
-    annualMaintenance: 900,
-    resaleFraction: 0.55,
-    evRegYear: 2023,
-    note: "Sweet spot for many setups: meaningful price drop vs new, but catalogue still close enough to purchase price that BV bijtelling isn't punitive. Modern features, full warranty often still active.",
+    label: "Young Used", short: "Young", sublabel: "2–3 years old",
+    age: 2.5, catalogueMultiplier: 1.30, annualMaintenance: 900,
+    resaleFraction: 0.55, evRegYear: 2023,
+    note: "Sweet spot: meaningful price drop vs new, catalogue close enough to purchase price that BV bijtelling isn't punitive. Modern features, often warranty active.",
   },
   newCar: {
-    label: "New",
-    short: "New",
-    sublabel: "0–1 year old",
-    age: 0.5,
-    catalogueMultiplier: 1.0,
-    annualMaintenance: 600,
-    resaleFraction: 0.65,
-    evRegYear: 2026,
+    label: "New", short: "New", sublabel: "0–1 year old",
+    age: 0.5, catalogueMultiplier: 1.0, annualMaintenance: 600,
+    resaleFraction: 0.65, evRegYear: 2026,
     note: "Highest purchase price, but catalogue ≈ price (no hidden bijtelling premium), best resale, longest warranty, latest tech.",
   },
 };
-
 const STATE_ORDER = ["used", "young", "newCar"];
 
 const PREBAKED_PRICES = {
@@ -123,20 +100,18 @@ const PREBAKED_PRICES = {
   ev:     { used: 18000, young: 30000, newCar: 45000 },
 };
 
-function buildScenario(fuelKey, stateKey, type, carPrice, opts = {}) {
+function buildScenario(fuelKey, stateKey, carPrice, opts = {}) {
   const fuel = FUELS[fuelKey];
   const state = STATES[stateKey];
-  const catalogueValue = opts.catalogueValue ?? Math.round(carPrice * state.catalogueMultiplier);
-  const evRegYear = opts.evRegYear ?? state.evRegYear;
   return {
-    id: `${fuelKey}:${stateKey}:${type}`,
-    fuelKey, stateKey, type,
-    fuel, state,
+    fuelKey, stateKey, fuel, state,
+    color: fuel.color, accent: fuel.accent,
     label: `${state.label} ${fuel.label}`,
     short: `${state.short} ${fuel.short}`,
-    color: fuel.color, accent: fuel.accent,
-    isEV: fuel.isEV, isPHEV: fuel.isPHEV, evRegYear,
-    carPrice, catalogueValue,
+    isEV: fuel.isEV, isPHEV: fuel.isPHEV,
+    evRegYear: opts.evRegYear ?? state.evRegYear,
+    carPrice,
+    catalogueValue: opts.catalogueValue ?? Math.round(carPrice * state.catalogueMultiplier),
     annualMaintenance: state.annualMaintenance,
     annualKm: opts.annualKm ?? 18000,
     resaleFraction: state.resaleFraction,
@@ -162,104 +137,183 @@ function getMRBMonthly(scenario) {
   return base;
 }
 
-function calcMonthlyCosts(scenario, params) {
-  const { grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing, box2Rate } = params;
+function resaleAtAge(price, resaleFraction, years) {
+  return price * Math.pow(resaleFraction, years / 4);
+}
+
+// ============================================================================
+// Cost engine — per-segment costs over `years` years
+// ============================================================================
+// Returns absolute personal-equivalent costs (€, total over the segment).
+//   bvFactor = (1 − VPB) × (1 − box2) — the rate at which BV cash translates to personal cost
+function calcSegment(scenario, type, params, startPrice, years) {
+  const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate } = params;
   const cat = scenario.catalogueValue;
-  const price = scenario.carPrice;
-  const annualFuelCost = (scenario.fuel.fuelCostPer10k * scenario.annualKm) / 10000;
-  const annualRunning = annualFuelCost + scenario.annualMaintenance;
+  const months = years * 12;
+  const annualFuel = (scenario.fuel.fuelCostPer10k * scenario.annualKm) / 10000;
+  const annualRunning = annualFuel + scenario.annualMaintenance;
+  const annualMRB = getMRBMonthly(scenario) * 12;
+  const endResale = resaleAtAge(startPrice, scenario.resaleFraction, years);
+  const annualDepreciation = (startPrice - endResale) / years;
+  const avgCapital = (startPrice + endResale) / 2;
+  const annualOpportunity = avgCapital * OPPORTUNITY_RATE;
 
-  const resaleValue = price * Math.pow(scenario.resaleFraction, holdYears / 4);
-  const annualDepreciation = (price - resaleValue) / holdYears;
-  const avgCapital = (price + resaleValue) / 2;
-  const monthlyMRBGross = getMRBMonthly(scenario);
-  const annualMRB = monthlyMRBGross * 12;
-
-  if (scenario.type === "bv") {
+  if (type === "bv") {
     const bijtellingRate = getBijtellingRate(scenario, cat);
     const annualBijtelling = cat * bijtellingRate;
     const marginalRate = bijtellingMarginalRate(grossSalary, use30Ruling, annualBijtelling);
-    const monthlyBijtellingTax = (annualBijtelling * marginalRate) / 12;
-
-    const annualOpportunity = avgCapital * OPPORTUNITY_RATE;
+    const annualBijtellingTax = annualBijtelling * marginalRate;
     const annualPseudo = (!scenario.isEV && pseudoEindheffing) ? cat * 0.12 : 0;
+    const bvFactor = (1 - VPB_RATE) * (1 - box2Rate);
 
-    const grossBVCost = annualDepreciation + annualRunning + annualMRB + annualOpportunity + annualPseudo;
-    const vpbSaving = grossBVCost * VPB_RATE;
-    const netBVCash = grossBVCost - vpbSaving;
-    const personalEquivalent = netBVCash * (1 - box2Rate);
+    const annualPersonal =
+      annualBijtellingTax +
+      bvFactor * (annualDepreciation + annualRunning + annualMRB + annualOpportunity + annualPseudo);
 
-    const totalAnnualPersonal = personalEquivalent + annualBijtelling * marginalRate;
-    const totalMonthlyPersonal = totalAnnualPersonal / 12;
-
-    const f = (1 - VPB_RATE) * (1 - box2Rate);
     return {
-      type: "bv",
-      monthlyBijtellingTax: Math.round(monthlyBijtellingTax),
-      monthlyDepreciation: Math.round((annualDepreciation / 12) * f),
-      monthlyFuel: Math.round((annualFuelCost / 12) * f),
-      monthlyMaintenance: Math.round((scenario.annualMaintenance / 12) * f),
-      monthlyMRB: Math.round((monthlyMRBGross) * f),
-      monthlyCapitalCost: Math.round((annualOpportunity / 12) * f),
-      monthlyPseudo: Math.round((annualPseudo / 12) * f),
-      totalMonthlyPersonal: Math.round(totalMonthlyPersonal),
-      effectiveMarginalRate: Math.round(marginalRate * 1000) / 10,
-      bijtellingRate: Math.round(bijtellingRate * 1000) / 10,
-      annualBijtelling: Math.round(annualBijtelling),
-      vpbSaving: Math.round(vpbSaving),
-      annualPseudo: Math.round(annualPseudo),
-      resaleValue: Math.round(resaleValue),
-      capitalCostKind: `4% opp. on avg capital, net VPB & box 2`,
-      bvFactor: f,
+      type: "bv", years, months, startPrice, endResale,
+      bijtellingRate, annualBijtelling, marginalRate, annualBijtellingTax,
+      annualPseudo, bvFactor,
+      annualDepreciation, annualRunning, annualMRB, annualOpportunity,
+      monthly: {
+        bijtellingTax: annualBijtellingTax / 12,
+        pseudo: bvFactor * annualPseudo / 12,
+        depreciation: bvFactor * annualDepreciation / 12,
+        fuel: bvFactor * annualFuel / 12,
+        maintenance: bvFactor * scenario.annualMaintenance / 12,
+        mrb: bvFactor * annualMRB / 12,
+        capital: bvFactor * annualOpportunity / 12,
+        total: annualPersonal / 12,
+      },
+      total: annualPersonal * years,
+      // Walk-away: at end of segment the BV holds endResale cash-equivalent (the car).
+      // To convert to personal, dividend out → lose box 2.
+      walkAwayBVAsset: endResale,                             // car still in BV at this point
+      walkAwayPersonalIfExtracted: endResale * (1 - box2Rate),
     };
   } else {
-    const monthlyDepreciation = annualDepreciation / 12;
-    const monthlyFuel = annualFuelCost / 12;
-    const monthlyMaintenance = scenario.annualMaintenance / 12;
-    const monthlyMRB = monthlyMRBGross;
     const capitalRate = financeMode === "loan" ? LOAN_RATE : OPPORTUNITY_RATE;
-    const monthlyCapitalCost = avgCapital * capitalRate / 12;
-    const totalMonthlyPersonal =
-      monthlyDepreciation + monthlyFuel + monthlyMaintenance + monthlyMRB + monthlyCapitalCost;
-
+    const annualCapital = avgCapital * capitalRate;
+    const annualPersonal = annualDepreciation + annualRunning + annualMRB + annualCapital;
     return {
-      type: "private",
-      monthlyBijtellingTax: 0,
-      monthlyDepreciation: Math.round(monthlyDepreciation),
-      monthlyFuel: Math.round(monthlyFuel),
-      monthlyMaintenance: Math.round(monthlyMaintenance),
-      monthlyMRB: Math.round(monthlyMRB),
-      monthlyCapitalCost: Math.round(monthlyCapitalCost),
-      monthlyPseudo: 0,
-      totalMonthlyPersonal: Math.round(totalMonthlyPersonal),
-      effectiveMarginalRate: 0,
-      bijtellingRate: 0, annualBijtelling: 0, vpbSaving: 0, annualPseudo: 0,
-      resaleValue: Math.round(resaleValue),
-      capitalCostKind: financeMode === "loan" ? "loan interest 6% on avg capital" : "opportunity 4% on avg capital",
-      bvFactor: 1,
+      type: "private", years, months, startPrice, endResale,
+      bijtellingRate: 0, annualBijtelling: 0, marginalRate: 0, annualBijtellingTax: 0,
+      annualPseudo: 0, bvFactor: 1,
+      annualDepreciation, annualRunning, annualMRB, annualOpportunity: annualCapital,
+      monthly: {
+        bijtellingTax: 0, pseudo: 0,
+        depreciation: annualDepreciation / 12,
+        fuel: annualFuel / 12,
+        maintenance: scenario.annualMaintenance / 12,
+        mrb: annualMRB / 12,
+        capital: annualCapital / 12,
+        total: annualPersonal / 12,
+      },
+      total: annualPersonal * years,
+      walkAwayBVAsset: 0,
+      walkAwayPersonalIfExtracted: endResale, // already personal
     };
   }
 }
 
-function findCrossover(fuelKey, stateKey, params, opts = {}) {
-  const test = (price) => {
-    const bv = calcMonthlyCosts(buildScenario(fuelKey, stateKey, "bv", price, opts), params);
-    const pv = calcMonthlyCosts(buildScenario(fuelKey, stateKey, "private", price, opts), params);
-    return pv.totalMonthlyPersonal - bv.totalMonthlyPersonal;
+// ============================================================================
+// Strategies — compose segments into a multi-year plan
+// ============================================================================
+function strategyPureBV(scenario, params, totalYears) {
+  const seg = calcSegment(scenario, "bv", params, scenario.carPrice, totalYears);
+  return {
+    key: "bv", label: "BV for the whole period",
+    color: "#1abc9c",
+    segments: [seg],
+    totalYears,
+    totalCost: seg.total,
+    monthlyAvg: seg.total / (totalYears * 12),
+    residualPersonal: seg.walkAwayPersonalIfExtracted,
+    residualGross: seg.endResale,
+    residualLocation: "in BV",
+    residualNote: `Car worth €${Math.round(seg.endResale).toLocaleString()} but inside the BV. To get it (or its sale proceeds) into your personal hand, you'd dividend it out → lose ${Math.round(params.box2Rate*100)}% box 2.`,
+    netEconomicCost: seg.total - 0, // depreciation already nets the resale
   };
-  let lo = 4000, hi = 80000;
-  const sLo = test(lo), sHi = test(hi);
-  if (Math.sign(sLo) === Math.sign(sHi)) {
-    return { price: null, alwaysCheaper: sLo < 0 ? "private" : "bv" };
-  }
-  for (let i = 0; i < 22; i++) {
-    const mid = (lo + hi) / 2;
-    const sMid = test(mid);
-    if (Math.sign(sMid) === Math.sign(sLo)) lo = mid; else hi = mid;
-  }
-  return { price: Math.round((lo + hi) / 2 / 500) * 500, alwaysCheaper: null };
 }
 
+function strategyPurePrivate(scenario, params, totalYears) {
+  const seg = calcSegment(scenario, "private", params, scenario.carPrice, totalYears);
+  return {
+    key: "private", label: "Private for the whole period",
+    color: "#e67e22",
+    segments: [seg],
+    totalYears,
+    totalCost: seg.total,
+    monthlyAvg: seg.total / (totalYears * 12),
+    residualPersonal: seg.endResale,
+    residualGross: seg.endResale,
+    residualLocation: "personal",
+    residualNote: `Car worth €${Math.round(seg.endResale).toLocaleString()}, already personally owned — you can sell or keep with no further tax friction.`,
+    netEconomicCost: seg.total,
+  };
+}
+
+function strategyExtension(scenario, params, totalYears, switchYear) {
+  // Phase 1: BV for `switchYear` years
+  const phase1 = calcSegment(scenario, "bv", params, scenario.carPrice, switchYear);
+  // At end of phase 1, sell to self at FMV = phase1.endResale.
+  // Assuming BV depreciated to FMV, gain = 0, no extra VPB. Wealth-neutral transaction.
+  const phase2Years = totalYears - switchYear;
+  const phase2 = calcSegment(scenario, "private", params, phase1.endResale, phase2Years);
+  return {
+    key: "extension", label: `BV ${switchYear}y → buy out → Private ${phase2Years}y`,
+    color: "#f1c40f",
+    segments: [phase1, phase2],
+    totalYears,
+    switchYear,
+    totalCost: phase1.total + phase2.total,
+    monthlyAvg: (phase1.total + phase2.total) / (totalYears * 12),
+    residualPersonal: phase2.endResale, // personally owned at end
+    residualGross: phase2.endResale,
+    residualLocation: "personal",
+    residualNote: `After year ${switchYear} the car is yours personally. End-of-period value €${Math.round(phase2.endResale).toLocaleString()} is direct personal cash equivalent.`,
+    netEconomicCost: phase1.total + phase2.total,
+    transactionAtSwitch: {
+      transferPrice: phase1.endResale,
+      gainOnSale: 0,
+      vpbCostOnGain: 0,
+    },
+  };
+}
+
+function strategyExtensionWithPenalty(scenario, params, totalYears, switchYear) {
+  // Variant where BV book value < FMV at switch (e.g. forced 5-year linear depreciation).
+  // We model BV book = max(price × max(0, 1 - switchYear/5), price × 0.10)
+  const bookValue = Math.max(scenario.carPrice * Math.max(0, 1 - switchYear / 5), scenario.carPrice * 0.10);
+  const phase1 = calcSegment(scenario, "bv", params, scenario.carPrice, switchYear);
+  const fmv = phase1.endResale;
+  const gain = Math.max(0, fmv - bookValue);
+  const vpbCostOnGain = gain * VPB_RATE; // BV pays VPB on the gain
+  const phase2Years = totalYears - switchYear;
+  const phase2 = calcSegment(scenario, "private", params, fmv, phase2Years);
+  // Personal-equiv impact of VPB cost on gain (paid by BV, eventually box-2 hits dividend extraction)
+  const vpbCostPersonalEquiv = vpbCostOnGain * (1 - params.box2Rate);
+  return {
+    key: "extensionPenalty",
+    totalCost: phase1.total + phase2.total + vpbCostPersonalEquiv,
+    bookValue, fmv, gain, vpbCostOnGain, vpbCostPersonalEquiv,
+    monthlyAvg: (phase1.total + phase2.total + vpbCostPersonalEquiv) / (totalYears * 12),
+    residualPersonal: phase2.endResale,
+  };
+}
+
+function findBestSwitchYear(scenario, params, totalYears) {
+  let best = { switchYear: null, totalCost: Infinity };
+  for (let s = 1; s <= totalYears - 1; s++) {
+    const ext = strategyExtension(scenario, params, totalYears, s);
+    if (ext.totalCost < best.totalCost) best = { switchYear: s, totalCost: ext.totalCost, strategy: ext };
+  }
+  return best;
+}
+
+// ============================================================================
+// UI components
+// ============================================================================
 const Toggle = ({ value, onChange, color, label, sub }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
     <div onClick={() => onChange(!value)} style={{
@@ -281,7 +335,7 @@ const Toggle = ({ value, onChange, color, label, sub }) => (
 );
 
 const Segmented = ({ value, onChange, options, color = "#3498db", small }) => (
-  <div style={{ display: "inline-flex", background: "#0d0d1a", borderRadius: 6, padding: 3, border: "1px solid #1e1e3a" }}>
+  <div style={{ display: "inline-flex", background: "#0d0d1a", borderRadius: 6, padding: 3, border: "1px solid #1e1e3a", flexWrap: "wrap" }}>
     {options.map(opt => (
       <button key={opt.value} onClick={() => onChange(opt.value)} style={{
         background: value === opt.value ? color : "transparent",
@@ -294,103 +348,98 @@ const Segmented = ({ value, onChange, options, color = "#3498db", small }) => (
   </div>
 );
 
-const BarRow = ({ label, value, max, color }) => (
-  <div style={{ marginBottom: 7 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 2 }}>
-      <span>{label}</span>
-      <span style={{ color: "#ccc", fontWeight: 600 }}>€{value}/mo</span>
-    </div>
-    <div style={{ background: "#1a1a2e", borderRadius: 3, height: 6, overflow: "hidden" }}>
-      <div style={{
-        width: `${Math.min(100, (Math.abs(value) / Math.max(max, 1)) * 100)}%`,
-        height: "100%", background: color, borderRadius: 3, transition: "width 0.4s ease",
-      }} />
-    </div>
-  </div>
-);
+const fmt = n => `€${Math.round(n).toLocaleString()}`;
 
+// ============================================================================
+// Main component
+// ============================================================================
 export default function CarComparison() {
   const [grossSalary, setGrossSalary] = useState(80000);
   const [use30Ruling, setUse30Ruling] = useState(true);
-  const [holdYears, setHoldYears] = useState(4);
+  const [holdYears, setHoldYears] = useState(5);
   const [annualKm, setAnnualKm] = useState(18000);
   const [financeMode, setFinanceMode] = useState("cash");
   const [pseudoEindheffing, setPseudoEindheffing] = useState(true);
+  const [registerBefore2027, setRegisterBefore2027] = useState(false);
   const [box2Rate, setBox2Rate] = useState(0.245);
 
   const [activeFuel, setActiveFuel] = useState("hybrid");
   const [activeState, setActiveState] = useState("young");
   const [customPrice, setCustomPrice] = useState(22000);
   const [customCatalogue, setCustomCatalogue] = useState(null);
+  const [switchYear, setSwitchYear] = useState(3);
 
-  const params = { grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing, box2Rate };
+  const effectivePseudo = registerBefore2027 ? false : pseudoEindheffing;
+
+  const params = useMemo(() => ({
+    grossSalary, use30Ruling, financeMode,
+    pseudoEindheffing: effectivePseudo, box2Rate,
+  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate]);
 
   const taxableAfter = taxableAfterRuling(grossSalary, use30Ruling);
 
-  // Full matrix at prebaked prices, both paths
+  // Active scenario
+  const activeScenario = useMemo(() => buildScenario(activeFuel, activeState, customPrice, {
+    annualKm, catalogueValue: customCatalogue ?? undefined,
+  }), [activeFuel, activeState, customPrice, customCatalogue, annualKm]);
+
+  // Three strategies on the active scenario
+  const stratPureBV = useMemo(() => strategyPureBV(activeScenario, params, holdYears),
+    [activeScenario, params, holdYears]);
+  const stratPurePV = useMemo(() => strategyPurePrivate(activeScenario, params, holdYears),
+    [activeScenario, params, holdYears]);
+  const safeSwitch = Math.max(1, Math.min(switchYear, holdYears - 1));
+  const stratExt = useMemo(() => strategyExtension(activeScenario, params, holdYears, safeSwitch),
+    [activeScenario, params, holdYears, safeSwitch]);
+  const bestSwitch = useMemo(() => findBestSwitchYear(activeScenario, params, holdYears),
+    [activeScenario, params, holdYears]);
+
+  // 2027-rule insight: same scenario but with pseudo on regardless
+  const insight2027 = useMemo(() => {
+    const paramsPseudoOn = { ...params, pseudoEindheffing: true };
+    const paramsPseudoOff = { ...params, pseudoEindheffing: false };
+    const bvOn = strategyPureBV(activeScenario, paramsPseudoOn, holdYears);
+    const bvOff = strategyPureBV(activeScenario, paramsPseudoOff, holdYears);
+    const extOn = bestSwitch.switchYear ? strategyExtension(activeScenario, paramsPseudoOn, holdYears, bestSwitch.switchYear) : null;
+    const extOff = bestSwitch.switchYear ? strategyExtension(activeScenario, paramsPseudoOff, holdYears, bestSwitch.switchYear) : null;
+    return {
+      bvSavingsByRegistering: bvOn.totalCost - bvOff.totalCost,
+      extSavingsByRegistering: extOn && extOff ? extOn.totalCost - extOff.totalCost : 0,
+    };
+  }, [activeScenario, params, holdYears, bestSwitch.switchYear]);
+
+  const strategies = [stratPurePV, stratPureBV, stratExt];
+  const cheapestStrategy = strategies.reduce((b, s) => s.totalCost < b.totalCost ? s : b, strategies[0]);
+
+  // Matrix at typical prices: each cell shows the cheapest of {Private, BV, ExtensionAtBest}
   const matrix = useMemo(() => {
     const out = {};
     for (const fk of FUEL_ORDER) {
       out[fk] = {};
       for (const sk of STATE_ORDER) {
         const price = PREBAKED_PRICES[fk][sk];
-        const bvSc = buildScenario(fk, sk, "bv", price, { annualKm });
-        const pvSc = buildScenario(fk, sk, "private", price, { annualKm });
-        const bv = { ...bvSc, calc: calcMonthlyCosts(bvSc, params) };
-        const pv = { ...pvSc, calc: calcMonthlyCosts(pvSc, params) };
-        const cross = findCrossover(fk, sk, params, { annualKm });
-        out[fk][sk] = { fuelKey: fk, stateKey: sk, price, bv, pv, cross };
+        const sc = buildScenario(fk, sk, price, { annualKm });
+        const pv = strategyPurePrivate(sc, params, holdYears);
+        const bv = strategyPureBV(sc, params, holdYears);
+        const best = findBestSwitchYear(sc, params, holdYears);
+        const candidates = [pv, bv, best.strategy].filter(Boolean);
+        const winner = candidates.reduce((b, s) => s.totalCost < b.totalCost ? s : b, candidates[0]);
+        out[fk][sk] = { fuelKey: fk, stateKey: sk, price, pv, bv, ext: best.strategy, switchYear: best.switchYear, winner };
       }
     }
     return out;
-  }, [grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing, box2Rate, annualKm]);
+  }, [params, holdYears, annualKm]);
 
-  // Active cell
-  const activePrice = customPrice;
-  const activeCatalogue = customCatalogue;
-  const activeBV = useMemo(() => {
-    const sc = buildScenario(activeFuel, activeState, "bv", activePrice,
-      { annualKm, catalogueValue: activeCatalogue ?? undefined });
-    return { ...sc, calc: calcMonthlyCosts(sc, params) };
-  }, [activeFuel, activeState, activePrice, activeCatalogue, params, annualKm]);
-  const activePV = useMemo(() => {
-    const sc = buildScenario(activeFuel, activeState, "private", activePrice,
-      { annualKm, catalogueValue: activeCatalogue ?? undefined });
-    return { ...sc, calc: calcMonthlyCosts(sc, params) };
-  }, [activeFuel, activeState, activePrice, activeCatalogue, params, annualKm]);
-  const activeCross = useMemo(() => findCrossover(activeFuel, activeState, params, {
-    annualKm, catalogueValue: activeCatalogue ?? undefined,
-  }), [activeFuel, activeState, activeCatalogue, params, annualKm]);
-
-  const activeWinner = activeBV.calc.totalMonthlyPersonal <= activePV.calc.totalMonthlyPersonal ? "bv" : "private";
-  const activeDiff = Math.abs(activeBV.calc.totalMonthlyPersonal - activePV.calc.totalMonthlyPersonal);
-
-  // Cheapest cell across the whole prebaked matrix
   const matrixCells = FUEL_ORDER.flatMap(fk => STATE_ORDER.map(sk => matrix[fk][sk]));
-  const cheapestOption = matrixCells.reduce((best, cell) => {
-    const bv = cell.bv.calc.totalMonthlyPersonal;
-    const pv = cell.pv.calc.totalMonthlyPersonal;
-    const cellMin = Math.min(bv, pv);
-    if (cellMin < best.value) {
-      return { value: cellMin, cell, path: bv <= pv ? "bv" : "private" };
-    }
-    return best;
-  }, { value: Infinity, cell: null, path: null });
+  const cheapestCell = matrixCells.reduce((b, c) =>
+    c.winner.monthlyAvg < b.winner.monthlyAvg ? c : b, matrixCells[0]);
 
-  const f = activeWinner === "bv" ? activeBV : activePV;
-  const maxBar = Math.max(1, ...["monthlyBijtellingTax", "monthlyDepreciation", "monthlyFuel",
-    "monthlyMaintenance", "monthlyMRB", "monthlyCapitalCost", "monthlyPseudo"]
-    .map(k => Math.max(activeBV.calc[k] || 0, activePV.calc[k] || 0)));
-
-  // Auto-update customPrice when fuel/state changes (use prebaked default)
   const setActiveCell = (fuelKey, stateKey) => {
     setActiveFuel(fuelKey);
     setActiveState(stateKey);
     setCustomPrice(PREBAKED_PRICES[fuelKey][stateKey]);
     setCustomCatalogue(null);
   };
-
-  const fmt = n => `€${Math.round(n).toLocaleString()}`;
 
   return (
     <>
@@ -409,12 +458,10 @@ export default function CarComparison() {
             DGA Auto Vergelijking · NL 2026 rules
           </div>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, color: "#f0f0f0", letterSpacing: -0.5 }}>
-            What's the cheapest way to own this car?
+            BV vs Private — and the buyout-and-extend tactic
           </h1>
           <p style={{ margin: "8px 0 0", fontSize: 14, color: "#aaa", lineHeight: 1.55 }}>
-            Compare <strong style={{ color: "#f1c40f" }}>4 fuel types × 3 ages × 2 paths (BV vs Private)</strong> as a true monthly cost
-            net of tax. Bijtelling marginal rate is computed against your salary + 30% ruling and 2026 brackets;
-            BV expenses net 19% VPB and the box 2 rate you'd pay to extract that money.
+            For each fuel × age combo, three strategies are compared: <strong style={{ color: "#e67e22" }}>Pure Private</strong> · <strong style={{ color: "#1abc9c" }}>Pure BV</strong> · <strong style={{ color: "#f1c40f" }}>BV → buy out at FMV → continue Private</strong>. The buyout tactic dodges bijtelling and pseudo-eindheffing in the late years and avoids the box 2 hit on residual value.
           </p>
         </div>
 
@@ -432,9 +479,10 @@ export default function CarComparison() {
             <div style={{ fontSize: 11, color: "#888" }}>Taxable after ruling: {fmt(taxableAfter)}</div>
           </div>
           <div>
-            <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Hold Period</label>
-            <input type="range" min={2} max={8} step={1} value={holdYears}
-              onChange={e => setHoldYears(+e.target.value)} style={{ width: "100%", accentColor: "#e74c3c" }} />
+            <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Total hold period</label>
+            <input type="range" min={3} max={10} step={1} value={holdYears}
+              onChange={e => { setHoldYears(+e.target.value); if (switchYear >= +e.target.value) setSwitchYear(+e.target.value - 1); }}
+              style={{ width: "100%", accentColor: "#e74c3c" }} />
             <div style={{ fontSize: 15, color: "#e74c3c", fontWeight: 700 }}>{holdYears} years</div>
           </div>
           <div>
@@ -446,15 +494,15 @@ export default function CarComparison() {
           <div>
             <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Box 2 (DGA dividend)</label>
             <Segmented value={box2Rate} onChange={setBox2Rate} color="#27ae60" options={[
-              { value: 0.245, label: "24.5% (≤€68.8k)" },
-              { value: 0.31,  label: "31% (above)" },
+              { value: 0.245, label: "24.5%" },
+              { value: 0.31,  label: "31%" },
             ]}/>
-            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Rate you'd pay to extract BV cash as dividend</div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>24.5% up to €68,843/yr; 31% above</div>
           </div>
           <Toggle value={use30Ruling} onChange={setUse30Ruling} color="#3498db"
             label="30% Ruling active"
             sub={use30Ruling
-              ? `Tax-free portion: ${fmt(grossSalary - taxableAfter)} (norm-capped at €48,013 taxable)`
+              ? `Tax-free portion: ${fmt(grossSalary - taxableAfter)} (capped at €48,013 norm)`
               : "No ruling — full salary taxable"} />
           <div>
             <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Private capital cost</div>
@@ -462,52 +510,48 @@ export default function CarComparison() {
               { value: "cash", label: "Cash (4% opp.)" },
               { value: "loan", label: "Loan (6%)" },
             ]}/>
-            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
-              {financeMode === "loan" ? "6%/yr interest on avg balance" : "4%/yr foregone on cash"}
-            </div>
           </div>
-          <div style={{ gridColumn: "1 / -1" }}>
+          <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <Toggle value={pseudoEindheffing} onChange={setPseudoEindheffing} color="#e67e22"
-              label="2027 pseudo-eindheffing applies (12%/yr cat. value, BV petrol/hybrid/PHEV)"
-              sub={pseudoEindheffing
-                ? "On — commute counts as private use; EVs exempt"
-                : "Off — applies if registered before 1 Jan 2027 (transition to 17 Sep 2030)"} />
+              label="2027 pseudo-eindheffing exists"
+              sub="12%/yr × cat., BV petrol/hybrid/PHEV; commute counts as private; EVs exempt"/>
+            <Toggle value={registerBefore2027} onChange={setRegisterBefore2027} color="#f1c40f"
+              label="I'll register the BV car before 1 Jan 2027"
+              sub={registerBefore2027 ? "Transition rule defers pseudo-eindheffing to 17 Sep 2030" : "Toggle on to apply transition rule"}/>
           </div>
         </div>
 
         {/* Cheapest banner */}
-        {cheapestOption.cell && (
-          <div style={{
-            background: `${cheapestOption.cell[cheapestOption.path].color}15`,
-            border: `1px solid ${cheapestOption.cell[cheapestOption.path].color}`,
-            borderRadius: 8, padding: "12px 14px", marginBottom: 16,
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <div>
-              <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Cheapest option overall</div>
-              <div style={{ fontSize: 16, color: cheapestOption.cell[cheapestOption.path].color, fontWeight: 800 }}>
-                {cheapestOption.cell[cheapestOption.path].label} · {cheapestOption.path === "bv" ? "BV" : "Private"}
-              </div>
-              <div style={{ fontSize: 12, color: "#888" }}>at typical price {fmt(cheapestOption.cell.price)}</div>
+        <div style={{
+          background: `${cheapestCell.winner.color}15`,
+          border: `1px solid ${cheapestCell.winner.color}`,
+          borderRadius: 8, padding: "12px 14px", marginBottom: 16,
+          display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8,
+        }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Cheapest of all 36 combos (4 fuels × 3 ages × 3 strategies)</div>
+            <div style={{ fontSize: 16, color: cheapestCell.winner.color, fontWeight: 800 }}>
+              {STATES[cheapestCell.stateKey].label} {FUELS[cheapestCell.fuelKey].label} · {cheapestCell.winner.label}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 30, color: cheapestOption.cell[cheapestOption.path].color, fontWeight: 900, lineHeight: 1 }}>
-                {fmt(cheapestOption.value)}
-              </div>
-              <div style={{ fontSize: 11, color: "#888" }}>/mo net to you</div>
-            </div>
+            <div style={{ fontSize: 12, color: "#888" }}>at typical price {fmt(cheapestCell.price)}, {holdYears}-year hold</div>
           </div>
-        )}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 30, color: cheapestCell.winner.color, fontWeight: 900, lineHeight: 1 }}>
+              {fmt(cheapestCell.winner.monthlyAvg)}<span style={{ fontSize: 14, color: "#666" }}>/mo</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#888" }}>= {fmt(cheapestCell.winner.totalCost)} over {holdYears}y</div>
+          </div>
+        </div>
 
-        {/* The Matrix */}
+        {/* Matrix */}
         <div style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 }}>
-          Fuel × Age matrix · cheaper of (BV, Private) at typical price
+          Fuel × Age matrix · best of (Private, BV, BV→Private extension) at typical price
         </div>
         <div style={{
           background: "#0a0d18", border: "1px solid #1e1e3a", borderRadius: 8,
           padding: 8, marginBottom: 16, overflowX: "auto",
         }}>
-          <div style={{ display: "grid", gridTemplateColumns: "100px repeat(3, 1fr)", gap: 6, minWidth: 560 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "100px repeat(3, 1fr)", gap: 6, minWidth: 600 }}>
             <div></div>
             {STATE_ORDER.map(sk => (
               <div key={sk} style={{ textAlign: "center", padding: "8px 4px" }}>
@@ -523,30 +567,26 @@ export default function CarComparison() {
                 }}>{FUELS[fk].short}</div>
                 {STATE_ORDER.map(sk => {
                   const cell = matrix[fk][sk];
-                  const bv = cell.bv.calc.totalMonthlyPersonal;
-                  const pv = cell.pv.calc.totalMonthlyPersonal;
-                  const winnerIsBV = bv <= pv;
-                  const winnerVal = Math.min(bv, pv);
+                  const w = cell.winner;
                   const isActive = activeFuel === fk && activeState === sk;
-                  const isCheapest = cell === cheapestOption.cell;
+                  const isCheapest = cell === cheapestCell;
+                  const tagText = w.key === "extension" ? `BV→Pv@y${cell.switchYear}` : (w.key === "bv" ? "BV" : "Private");
                   return (
                     <div key={`${fk}-${sk}`} onClick={() => setActiveCell(fk, sk)} style={{
                       background: isActive ? `${FUELS[fk].color}20` : (isCheapest ? `${FUELS[fk].color}10` : "#0d0d1a"),
                       border: `1px solid ${isActive ? FUELS[fk].color : (isCheapest ? `${FUELS[fk].color}55` : "#1e1e3a")}`,
                       borderRadius: 6, padding: 8, cursor: "pointer",
-                      transition: "all 0.15s", position: "relative",
+                      transition: "all 0.15s",
                     }}>
                       <div style={{
-                        fontSize: 9, color: winnerIsBV ? "#1abc9c" : "#e67e22",
+                        fontSize: 9, color: w.color,
                         letterSpacing: 1, fontWeight: 800, textTransform: "uppercase",
-                      }}>
-                        {winnerIsBV ? "BV ✓" : "Private ✓"}
-                      </div>
+                      }}>{tagText} ✓</div>
                       <div style={{ fontSize: 22, fontWeight: 900, color: FUELS[fk].color, lineHeight: 1.1 }}>
-                        {fmt(winnerVal)}<span style={{ fontSize: 11, color: "#666" }}>/mo</span>
+                        {fmt(w.monthlyAvg)}<span style={{ fontSize: 11, color: "#666" }}>/mo</span>
                       </div>
                       <div style={{ fontSize: 10, color: "#666", marginTop: 3 }}>
-                        @ {fmt(cell.price)} · vs {winnerIsBV ? "Priv" : "BV"} {fmt(Math.max(bv, pv))}
+                        @ {fmt(cell.price)} · Pv {fmt(cell.pv.monthlyAvg)} BV {fmt(cell.bv.monthlyAvg)}
                       </div>
                     </div>
                   );
@@ -556,121 +596,172 @@ export default function CarComparison() {
           </div>
         </div>
 
-        {/* Active cell deep-dive */}
+        {/* Active scenario inputs */}
         <div style={{
           background: "#111122", border: `1px solid ${FUELS[activeFuel].color}40`,
           borderRadius: 8, padding: 16, marginBottom: 16,
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-            <div>
-              <div style={{ fontSize: 11, color: FUELS[activeFuel].accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>
-                ▶ {STATES[activeState].label} {FUELS[activeFuel].label} — Deep dive
-              </div>
-              <div style={{ fontSize: 12, color: "#888", maxWidth: 700 }}>
-                {FUELS[activeFuel].note} {STATES[activeState].note}
-              </div>
-            </div>
+          <div style={{ fontSize: 11, color: FUELS[activeFuel].accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>
+            ▶ Custom: {STATES[activeState].label} {FUELS[activeFuel].label}
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>
+            {FUELS[activeFuel].note} — {STATES[activeState].note}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
-              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                Purchase price
-              </label>
+              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Purchase price</label>
               <input type="range" min={4000} max={80000} step={500} value={customPrice}
                 onChange={e => { setCustomPrice(+e.target.value); setCustomCatalogue(null); }}
                 style={{ width: "100%", accentColor: FUELS[activeFuel].color }} />
-              <div style={{ fontSize: 16, color: FUELS[activeFuel].color, fontWeight: 700 }}>{fmt(customPrice)}</div>
+              <div style={{ fontSize: 15, color: FUELS[activeFuel].color, fontWeight: 700 }}>{fmt(customPrice)}</div>
             </div>
             <div>
-              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                Catalogue value (bijtelling base)
-              </label>
+              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Catalogue value (bijtelling base)</label>
               <input type="range" min={Math.max(customPrice, 4000)} max={Math.max(customPrice * 3, 80000)} step={500}
                 value={customCatalogue ?? Math.round(customPrice * STATES[activeState].catalogueMultiplier)}
                 onChange={e => setCustomCatalogue(+e.target.value)}
                 style={{ width: "100%", accentColor: "#f1c40f" }} />
-              <div style={{ fontSize: 16, color: "#f1c40f", fontWeight: 700 }}>
+              <div style={{ fontSize: 15, color: "#f1c40f", fontWeight: 700 }}>
                 {fmt(customCatalogue ?? Math.round(customPrice * STATES[activeState].catalogueMultiplier))}
-                {customCatalogue === null && <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}> · default {STATES[activeState].catalogueMultiplier}× price</span>}
+                {customCatalogue === null && <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}> ({STATES[activeState].catalogueMultiplier}× price)</span>}
               </div>
             </div>
-          </div>
-
-          {/* Side-by-side BV vs Private */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-            {[
-              { side: activeBV, label: "BV path", color: "#1abc9c", winner: activeWinner === "bv",
-                sub: `bijtelling ${activeBV.calc.bijtellingRate}% · ${activeBV.calc.effectiveMarginalRate}% marginal` },
-              { side: activePV, label: "Private path", color: "#e67e22", winner: activeWinner === "private",
-                sub: financeMode === "loan" ? "loan 6%" : "cash 4% opp." },
-            ].map(c => (
-              <div key={c.label} style={{
-                background: c.winner ? `${c.color}15` : "#0d0d1a",
-                border: `1px solid ${c.winner ? c.color : "transparent"}`,
-                borderRadius: 6, padding: 12,
-              }}>
-                <div style={{ fontSize: 11, color: c.color, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>
-                  {c.label} {c.winner && "✓"}
-                </div>
-                <div style={{ fontSize: 28, fontWeight: 900, color: c.color, lineHeight: 1 }}>
-                  {fmt(c.side.calc.totalMonthlyPersonal)}
-                </div>
-                <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{c.sub}</div>
+            <div>
+              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>BV→Private switch year</label>
+              <input type="range" min={1} max={Math.max(1, holdYears - 1)} step={1} value={safeSwitch}
+                onChange={e => setSwitchYear(+e.target.value)}
+                style={{ width: "100%", accentColor: "#f1c40f" }} />
+              <div style={{ fontSize: 15, color: "#f1c40f", fontWeight: 700 }}>
+                Year {safeSwitch} ({safeSwitch}y BV + {holdYears - safeSwitch}y Private)
               </div>
-            ))}
-          </div>
-
-          <div style={{ fontSize: 11, color: "#aaa", marginBottom: 12, padding: "8px 10px",
-            background: "#0a0a14", border: "1px solid #1e1e3a", borderRadius: 6 }}>
-            {activeCross.price !== null
-              ? <>BV ↔ Private crossover for this fuel/age @ <strong style={{ color: "#f1c40f" }}>{fmt(activeCross.price)}</strong> purchase price.
-                  Below it, {activePrice < activeCross.price ? "Private wins" : "BV wins"}; above it the other way around.</>
-              : <>At any reasonable price for this fuel/age, <strong style={{ color: activeCross.alwaysCheaper === "bv" ? "#1abc9c" : "#e67e22" }}>
-                  {activeCross.alwaysCheaper === "bv" ? "BV is always cheaper" : "Private is always cheaper"}</strong> under these settings.</>}
-          </div>
-
-          {/* Component bars (winner) */}
-          <div style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
-            Monthly components (winner: {activeWinner === "bv" ? "BV" : "Private"}, net to you)
-          </div>
-          {f.calc.monthlyBijtellingTax > 0 && <BarRow label="Bijtelling income tax" value={f.calc.monthlyBijtellingTax} max={maxBar} color={FUELS[activeFuel].color} />}
-          {f.calc.monthlyPseudo > 0 && <BarRow label="Pseudo-eindheffing (BV)" value={f.calc.monthlyPseudo} max={maxBar} color="#e67e22" />}
-          <BarRow label="Depreciation (price − resale)" value={f.calc.monthlyDepreciation} max={maxBar} color={FUELS[activeFuel].color} />
-          <BarRow label={f.type === "bv" ? "Capital cost (opp., net VPB & box 2)" : (financeMode === "loan" ? "Loan interest" : "Capital cost (opp.)")}
-            value={f.calc.monthlyCapitalCost} max={maxBar} color={FUELS[activeFuel].color} />
-          <BarRow label="Fuel / charging" value={f.calc.monthlyFuel} max={maxBar} color={FUELS[activeFuel].color} />
-          <BarRow label="Maintenance" value={f.calc.monthlyMaintenance} max={maxBar} color={FUELS[activeFuel].color} />
-          <BarRow label="Road tax (MRB)" value={f.calc.monthlyMRB} max={maxBar} color={FUELS[activeFuel].color} />
-
-          {/* Key facts */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 14 }}>
-            {[
-              { label: "Resale est.", value: fmt(f.calc.resaleValue), sub: `after ${holdYears}y (${Math.round(f.resaleFraction*100)}%/4y)` },
-              { label: "Annual bijtelling", value: f.type === "bv" ? fmt(f.calc.annualBijtelling) : "—", sub: f.type === "bv" ? `${f.calc.bijtellingRate}% × cat.` : "private path" },
-              { label: "Marginal on bijtelling", value: f.type === "bv" ? `${f.calc.effectiveMarginalRate}%` : "—", sub: use30Ruling ? "with 30% ruling" : "no ruling" },
-              { label: "VPB saving/yr", value: f.type === "bv" ? fmt(f.calc.vpbSaving) : "—", sub: "19% on BV costs" },
-              { label: "Pseudo/yr", value: f.type === "bv" && f.calc.annualPseudo > 0 ? fmt(f.calc.annualPseudo) : "—", sub: "12% × cat. (2027+)" },
-              { label: "BV→personal factor", value: f.type === "bv" ? `×${f.calc.bvFactor.toFixed(2)}` : "—", sub: "(1−VPB)(1−box 2)" },
-            ].map((it, i) => (
-              <div key={i} style={{ background: "#0d0d1a", borderRadius: 6, padding: 10 }}>
-                <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>{it.label}</div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: "#e0e0e0", marginTop: 2 }}>{it.value}</div>
-                <div style={{ fontSize: 10, color: "#888" }}>{it.sub}</div>
-              </div>
-            ))}
+              {bestSwitch.switchYear && bestSwitch.switchYear !== safeSwitch && (
+                <div style={{ fontSize: 11, color: "#27ae60", marginTop: 2, cursor: "pointer" }}
+                  onClick={() => setSwitchYear(bestSwitch.switchYear)}>
+                  ✓ Optimal switch is year {bestSwitch.switchYear} → click to use
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Three-way strategy comparison */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+          {strategies.map(s => {
+            const isWinner = s === cheapestStrategy;
+            return (
+              <div key={s.key} style={{
+                background: isWinner ? `${s.color}15` : "#111122",
+                border: `1px solid ${isWinner ? s.color : "#1e1e3a"}`,
+                borderRadius: 8, padding: 12,
+              }}>
+                <div style={{ fontSize: 11, color: s.color, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>
+                  {s.label} {isWinner && "✓"}
+                </div>
+                <div style={{ fontSize: 26, color: s.color, fontWeight: 900, lineHeight: 1 }}>
+                  {fmt(s.monthlyAvg)}<span style={{ fontSize: 12, color: "#666" }}>/mo avg</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{fmt(s.totalCost)} total over {holdYears}y</div>
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #1e1e3a", fontSize: 11, color: "#aaa", lineHeight: 1.5 }}>
+                  <div>Residual: <strong style={{ color: "#e0e0e0" }}>{fmt(s.residualGross)}</strong> {s.residualLocation === "in BV" ? "(BV)" : "(personal)"}</div>
+                  <div style={{ color: "#888" }}>Personal-equiv: {fmt(s.residualPersonal)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Detailed breakdown of the active scenario, all 3 strategies */}
+        <div style={{
+          background: "#111122", border: "1px solid #222",
+          borderRadius: 8, padding: 16, marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
+            Year-by-year breakdown · {STATES[activeState].label} {FUELS[activeFuel].label} · {fmt(customPrice)} purchase
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
+              <thead>
+                <tr style={{ color: "#999", textAlign: "left" }}>
+                  <th style={{ padding: "6px 8px", borderBottom: "1px solid #222" }}>Year</th>
+                  <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Pure Private</th>
+                  <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Pure BV</th>
+                  <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Buyout @ y{safeSwitch}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: holdYears }, (_, i) => {
+                  const y = i + 1;
+                  const pvPerYear = stratPurePV.totalCost / holdYears;
+                  const bvPerYear = stratPureBV.totalCost / holdYears;
+                  const extPerYear = y <= safeSwitch
+                    ? stratExt.segments[0].total / safeSwitch
+                    : (stratExt.segments[1] ? stratExt.segments[1].total / (holdYears - safeSwitch) : 0);
+                  const phaseLabel = y <= safeSwitch ? "BV" : "Private";
+                  return (
+                    <tr key={y} style={{ borderBottom: "1px solid #1a1a2e" }}>
+                      <td style={{ padding: "6px 8px", color: "#aaa" }}>Year {y}</td>
+                      <td style={{ padding: "6px 8px", color: "#e67e22", textAlign: "right" }}>{fmt(pvPerYear)}</td>
+                      <td style={{ padding: "6px 8px", color: "#1abc9c", textAlign: "right" }}>{fmt(bvPerYear)}</td>
+                      <td style={{ padding: "6px 8px", color: "#f1c40f", textAlign: "right" }}>
+                        {fmt(extPerYear)} <span style={{ color: "#666", fontSize: 10 }}>({phaseLabel})</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ borderTop: "2px solid #222", fontWeight: 700 }}>
+                  <td style={{ padding: "8px", color: "#e0e0e0" }}>Total</td>
+                  <td style={{ padding: "8px", color: "#e67e22", textAlign: "right" }}>{fmt(stratPurePV.totalCost)}</td>
+                  <td style={{ padding: "8px", color: "#1abc9c", textAlign: "right" }}>{fmt(stratPureBV.totalCost)}</td>
+                  <td style={{ padding: "8px", color: "#f1c40f", textAlign: "right" }}>{fmt(stratExt.totalCost)}</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "4px 8px", color: "#999", fontSize: 11 }}>End-of-period car value (yours)</td>
+                  <td style={{ padding: "4px 8px", color: "#e67e22", textAlign: "right", fontSize: 11 }}>{fmt(stratPurePV.residualPersonal)}</td>
+                  <td style={{ padding: "4px 8px", color: "#1abc9c", textAlign: "right", fontSize: 11 }}>{fmt(stratPureBV.residualPersonal)} <span style={{ color: "#666" }}>(after box 2)</span></td>
+                  <td style={{ padding: "4px 8px", color: "#f1c40f", textAlign: "right", fontSize: 11 }}>{fmt(stratExt.residualPersonal)}</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "4px 8px", color: "#999", fontSize: 11 }}>Net 5-yr cost (what you really lose)</td>
+                  <td style={{ padding: "4px 8px", color: "#e67e22", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratPurePV.totalCost - stratPurePV.residualPersonal + stratPurePV.segments[0].endResale)}</td>
+                  <td style={{ padding: "4px 8px", color: "#1abc9c", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratPureBV.totalCost)}</td>
+                  <td style={{ padding: "4px 8px", color: "#f1c40f", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratExt.totalCost)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
+            "Net" cost is what you actually lose over the period: total paid minus the residual asset value you keep. For Pure BV, the residual is in the BV — extracting it via dividend costs you 1 − box 2 ({Math.round((1-box2Rate)*100)}%). The Buyout strategy avoids that hit.
+          </div>
+        </div>
+
+        {/* 2027 register-before insight */}
+        {(insight2027.bvSavingsByRegistering > 50 || insight2027.extSavingsByRegistering > 50) && !FUELS[activeFuel].isEV && (
+          <div style={{
+            background: "#1a1500", border: "1px solid #f1c40f",
+            borderRadius: 8, padding: 14, marginBottom: 14,
+          }}>
+            <div style={{ fontSize: 12, color: "#f1c40f", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>
+              ★ Register-before-2027 insight
+            </div>
+            <div style={{ fontSize: 13, color: "#e0e0e0", lineHeight: 1.6 }}>
+              For this {FUELS[activeFuel].label}, registering the BV car <strong>before 1 Jan 2027</strong> (transition rule) saves you about{" "}
+              <strong style={{ color: "#f1c40f" }}>{fmt(insight2027.bvSavingsByRegistering)}</strong> on Pure BV
+              {bestSwitch.switchYear && <> and <strong style={{ color: "#f1c40f" }}>{fmt(insight2027.extSavingsByRegistering)}</strong> on the buyout strategy</>}
+              {" "}over {holdYears} years. EVs are unaffected by this rule.
+            </div>
+          </div>
+        )}
 
         {/* Use-case guidance */}
         <div style={{ background: "#0d1117", border: "1px solid #1e2a1e", borderRadius: 8, padding: 14, marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#27ae60", letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 }}>
-            For long EU trips + city escapes + family of four
+            Family of 4 · long EU trips + city escapes — qualitative read
           </div>
-          <div style={{ fontSize: 13, color: "#bbb", lineHeight: 1.6 }}>
-            <strong style={{ color: "#e74c3c" }}>Petrol/Hybrid:</strong> No range or charging worry on motorway holidays. Hybrid wins city use too. <br />
-            <strong style={{ color: "#9b59b6" }}>PHEV:</strong> On long highway trips with full load, the battery does little — you carry expensive batteries that mostly hibernate, plus pay the heavier MRB class. Best only if your weekly use is &lt;50 km/day so you're truly mostly on electric. <br />
-            <strong style={{ color: "#1abc9c" }}>EV:</strong> Cheapest per km and tax-favoured. Long EU trips with a packed family car = real route planning around chargers, slower stops, and ~25–35% effective range loss with full load + AC + highway speed. Used Used EVs (≥2022) come with the locked-in 16% bijtelling — strongest BV case in the matrix.
+          <div style={{ fontSize: 13, color: "#bbb", lineHeight: 1.7 }}>
+            <strong style={{ color: "#e74c3c" }}>Petrol:</strong> Long range, cheapest entry, no charging anxiety. In BV, only viable as Used or Young Used + register-before-2027. <br/>
+            <strong style={{ color: "#e67e22" }}>Self-charging Hybrid:</strong> Best mixed-use balance. Quiet city, fuel-efficient, highway-capable, no charging logistics. <br/>
+            <strong style={{ color: "#9b59b6" }}>PHEV:</strong> Worst-of-three for your usage. Heavier MRB class (2026), full pseudo-eindheffing, and on long highway trips with packed roof box and 4 people you mostly burn petrol while hauling battery weight. Only good if &lt;50 km/day daily use. <br/>
+            <strong style={{ color: "#1abc9c" }}>EV:</strong> Cheapest per km and tax-favoured. For long EU trips: realistic to plan around fast chargers, expect 25–35% range loss with full load + AC + highway speed; younger kids tolerate 30-min charging stops well. Used EV (≥2022 reg) carries the locked-in 16% bijtelling — BV path very attractive there.
           </div>
         </div>
 
@@ -682,32 +773,38 @@ export default function CarComparison() {
           <div style={{ fontSize: 13, color: "#bbb", lineHeight: 1.6 }}>
             From <strong>1 Jan 2027</strong>, the BV (employer) pays <strong style={{ color: "#e67e22" }}>+12% of catalogue value/yr</strong> for any
             petrol/hybrid/PHEV car made available to an employee — and <strong>commute counts as private use</strong>.
-            EVs (and hydrogen) are exempt. If the car is registered to the BV before <strong>1 Jan 2027</strong>, a transition rule defers this until <strong>17 Sep 2030</strong>.
-            Toggle above to model with/without it.
+            EVs and hydrogen are exempt. Register the car to the BV before <strong>1 Jan 2027</strong> → transition rule defers this until <strong>17 Sep 2030</strong>.
           </div>
         </div>
 
         {/* Methodology */}
         <details style={{ background: "#0a0a14", border: "1px solid #1e1e3a", borderRadius: 8, padding: 14, marginBottom: 14 }}>
           <summary style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", cursor: "pointer" }}>
-            Methodology — what's modeled, what isn't
+            Methodology · what's modeled, what isn't
           </summary>
           <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.7, marginTop: 10 }}>
-            <strong style={{ color: "#e0e0e0" }}>BV path personal cost</strong> = <code>(annual BV cash outflow − 19% VPB) × (1 − box 2 rate) + bijtelling × marginal income tax</code>.
-            Bijtelling marginal rate is the actual delta in box 1 tax when bijtelling is added on top of taxable salary (post-30% ruling cap).
-            <br /><br />
-            <strong style={{ color: "#e0e0e0" }}>Private path personal cost</strong> = depreciation + fuel + maintenance + MRB + capital cost. Capital cost is either 4% opportunity (cash) or 6% interest (loan), both on average outstanding balance <code>(price + resale)/2</code>.
-            <br /><br />
-            <strong style={{ color: "#e0e0e0" }}>Bijtelling rates used</strong>: 22% petrol/hybrid/PHEV always. EV: locked-in 60-month rate based on registration year (2022: 16% on first €35k cap; 2023–24: 16% on €30k cap; 2025: 17%; 2026: 18%; spillover above cap: 22%).
-            <br /><br />
-            <strong style={{ color: "#e0e0e0" }}>MRB 2026</strong>: petrol/hybrid base; PHEV +25% (lost ¾-rate, lost 125-kg correction); EV ×0.70.
-            <br /><br />
-            <strong style={{ color: "#e0e0e0" }}>Not modeled</strong>: BPM (one-off registration tax), MIA/KIA, BTW recovery on BV purchase, end-of-cycle BV-to-private sale at fair value, CO2-based MRB nuances, region-based MRB surcharges, insurance.
+            <strong style={{ color: "#e0e0e0" }}>Personal-equivalent cost factor for BV cash:</strong> <code>(1 − VPB)(1 − box 2)</code> ≈ {((1-VPB_RATE)*(1-box2Rate)).toFixed(3)} at current settings. €1 of BV cash → {((1-VPB_RATE)*(1-box2Rate)).toFixed(3)} of personal cash after dividending out.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>Bijtelling marginal rate:</strong> actual delta in 2026 box 1 tax when annual bijtelling is added on top of post-30%-ruling taxable salary. Brackets: 35.75 / 37.56 / 49.50 with breakpoints €38,883 and €78,426.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>EV bijtelling lock-in:</strong> 60-month period from first registration. 2022: 16% on €35k cap. 2023–24: 16% on €30k cap. 2025: 17%. 2026: 18%. Above cap: 22%. After 60 months → standard rate of that year.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>2026 MRB:</strong> EV pays 70% of normal rate, PHEV pays 100% (lost both the ¾-rate and the 125 kg correction), petrol/hybrid 100%.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>Buyout strategy assumption:</strong> at the switch year, BV sells the car to you (the DGA) at fair market value (= modeled resale value at that age). We assume BV's book value matches FMV (clean depreciation), so no taxable gain. In reality if BV used standard 5-year linear depreciation with a 10% residual floor, a small VPB cost on the gain may apply for short BV phases — typically &lt;€500 personal-equiv for normal cases.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>BPM:</strong> NL purchase tax. For consumer cars, BPM is already inside the dealer asking price and the catalogusprijs — no separate line. For BV imports it can be reclaimed in narrow cases; not modeled here.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>MIA / KIA:</strong> Investment deductions for company cars. In 2026 these no longer apply to passenger BEVs as they did pre-2024; specific eligibility depends on the Milieulijst and changes annually. Not modeled — could subtract a few hundred €/yr from BV cost for eligible new EVs.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>Not modeled:</strong> insurance (~€700–€1,500/yr, similar across paths so a near-wash), CO₂-based MRB nuances, regional MRB surcharges, BPM refunds for BV-to-BV trades, depreciation tax-asymmetries during the BV→Private buyout if BV used non-FMV depreciation.
+            <br/><br/>
+            <strong style={{ color: "#e0e0e0" }}>Capital cost:</strong> charged on average outstanding balance <code>(price + resale)/2</code>. BV path uses 4% opportunity (as if cash had been retained in BV). Private path uses 4% opp. (cash) or 6% interest (loan).
           </div>
         </details>
 
         <div style={{ fontSize: 11, color: "#666", textAlign: "center", lineHeight: 1.6 }}>
-          Estimates only · Verify with your accountant · 2026 NL tax rates baked in · Source-of-truth: this open code
+          Estimates only · Verify with your accountant · 2026 NL tax rates baked in · Open source: <a href="https://github.com/AsafAgranatProsus/Car-cost-calculator" style={{ color: "#3498db", textDecoration: "none" }}>github.com/AsafAgranatProsus/Car-cost-calculator</a>
         </div>
       </div>
     </>
