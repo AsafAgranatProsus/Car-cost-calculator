@@ -147,14 +147,19 @@ function resaleAtAge(price, resaleFraction, years) {
 // Returns absolute personal-equivalent costs (€, total over the segment).
 //   bvFactor = (1 − VPB) × (1 − box2) — the rate at which BV cash translates to personal cost
 function calcSegment(scenario, type, params, startPrice, years) {
-  const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate, cashRetentionMode } = params;
+  const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate, cashRetentionMode,
+    oilStress = 1.0, bvProfitable = true } = params;
   // If user plans to leave BV cash inside the BV (no dividend in foreseeable future),
   // box 2 doesn't apply to ongoing operating costs OR to residual extraction.
   // The "extract" mode is the default conservative assumption.
   const effectiveBox2 = cashRetentionMode === "retain" ? 0 : box2Rate;
+  // If BV has no taxable profit to offset, VPB deduction is worth nothing.
+  const effectiveVPB = bvProfitable ? VPB_RATE : 0;
   const cat = scenario.catalogueValue;
   const months = years * 12;
-  const annualFuel = (scenario.fuel.fuelCostPer10k * scenario.annualKm) / 10000;
+  // Oil-stress multiplier applies to ICE fuels; EV charging cost is much less sensitive.
+  const fuelStressMult = scenario.isEV ? 1 + (oilStress - 1) * 0.15 : oilStress;
+  const annualFuel = (scenario.fuel.fuelCostPer10k * fuelStressMult * scenario.annualKm) / 10000;
   const annualRunning = annualFuel + scenario.annualMaintenance;
   const annualMRB = getMRBMonthly(scenario) * 12;
   const endResale = resaleAtAge(startPrice, scenario.resaleFraction, years);
@@ -168,11 +173,11 @@ function calcSegment(scenario, type, params, startPrice, years) {
     const marginalRate = bijtellingMarginalRate(grossSalary, use30Ruling, annualBijtelling);
     const annualBijtellingTax = annualBijtelling * marginalRate;
     const annualPseudo = (!scenario.isEV && pseudoEindheffing) ? cat * 0.12 : 0;
-    const bvFactor = (1 - VPB_RATE) * (1 - effectiveBox2);
+    const bvFactor = (1 - effectiveVPB) * (1 - effectiveBox2);
 
-    // Gross BV expenses (deductible against VPB).
+    // Gross BV expenses (deductible against VPB if BV is profitable).
     const annualBVGrossCost = annualDepreciation + annualRunning + annualMRB + annualOpportunity + annualPseudo;
-    const annualVPBSaving = annualBVGrossCost * VPB_RATE;
+    const annualVPBSaving = annualBVGrossCost * effectiveVPB;
     const annualBVCashAfterVPB = annualBVGrossCost - annualVPBSaving;
     const annualBox2Drag = annualBVCashAfterVPB * effectiveBox2;
 
@@ -382,6 +387,8 @@ export default function CarComparison() {
   const [registerBefore2027, setRegisterBefore2027] = useState(false);
   const [box2Rate, setBox2Rate] = useState(0.245);
   const [cashRetentionMode, setCashRetentionMode] = useState("extract");
+  const [oilStress, setOilStress] = useState(1.0);
+  const [bvProfitable, setBvProfitable] = useState(true);
 
   // Default ANCHOR = the user's baseline plan: Used Petrol Private @ €8k cash, 5y.
   const [activeFuel, setActiveFuel] = useState("petrol");
@@ -401,8 +408,8 @@ export default function CarComparison() {
 
   const params = useMemo(() => ({
     grossSalary, use30Ruling, financeMode,
-    pseudoEindheffing: effectivePseudo, box2Rate, cashRetentionMode,
-  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate, cashRetentionMode]);
+    pseudoEindheffing: effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable,
+  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable]);
 
   const taxableAfter = taxableAfterRuling(grossSalary, use30Ruling);
 
@@ -733,6 +740,27 @@ export default function CarComparison() {
             <Toggle value={registerBefore2027} onChange={setRegisterBefore2027} color="#f1c40f"
               label="I'll register the BV car before 1 Jan 2027"
               sub={registerBefore2027 ? "Transition rule defers pseudo-eindheffing to 17 Sep 2030" : "Toggle on to apply transition rule"}/>
+          </div>
+
+          {/* Oil-price stress + BV profit risk */}
+          <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, paddingTop: 8, borderTop: "1px dashed #222" }}>
+            <div>
+              <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
+                Oil/fuel price stress
+              </label>
+              <input type="range" min={0.7} max={2.0} step={0.05} value={oilStress}
+                onChange={e => setOilStress(+e.target.value)} style={{ width: "100%", accentColor: "#e74c3c" }} />
+              <div style={{ fontSize: 14, color: "#e74c3c", fontWeight: 700 }}>
+                {(oilStress * 100).toFixed(0)}% of today's price
+                {oilStress !== 1.0 && <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}> ({oilStress > 1 ? "+" : ""}{((oilStress - 1) * 100).toFixed(0)}%)</span>}
+              </div>
+              <div style={{ fontSize: 11, color: "#888" }}>EV charging assumed only ~15% as oil-sensitive as ICE fuel</div>
+            </div>
+            <Toggle value={bvProfitable} onChange={setBvProfitable} color="#27ae60"
+              label="BV will be profitable enough to use VPB deduction"
+              sub={bvProfitable
+                ? "Default — €1 BV expense saves €0.19 corporate tax"
+                : "Profit-risk mode — VPB benefit set to 0; BV path becomes much worse"} />
           </div>
         </div>
 
