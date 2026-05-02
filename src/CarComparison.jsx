@@ -363,11 +363,19 @@ export default function CarComparison() {
   const [registerBefore2027, setRegisterBefore2027] = useState(false);
   const [box2Rate, setBox2Rate] = useState(0.245);
 
-  const [activeFuel, setActiveFuel] = useState("hybrid");
-  const [activeState, setActiveState] = useState("young");
-  const [customPrice, setCustomPrice] = useState(22000);
+  // Default ANCHOR = the user's baseline plan: Used Petrol Private @ €8k cash, 5y.
+  const [activeFuel, setActiveFuel] = useState("petrol");
+  const [activeState, setActiveState] = useState("used");
+  const [customPrice, setCustomPrice] = useState(8000);
   const [customCatalogue, setCustomCatalogue] = useState(null);
-  const [switchYear, setSwitchYear] = useState(3);
+  const [switchYear, setSwitchYear] = useState(2);
+
+  // Anchor scenario — the baseline plan everything is compared against.
+  // Defaults to "Used Petrol Private €8k cash", but any (fuel, state, price, strategy) can be pinned.
+  const [anchor, setAnchor] = useState({
+    fuelKey: "petrol", stateKey: "used", price: 8000, strategy: "private",
+    catalogueValue: null,
+  });
 
   const effectivePseudo = registerBefore2027 ? false : pseudoEindheffing;
 
@@ -434,6 +442,66 @@ export default function CarComparison() {
   const cheapestCell = matrixCells.reduce((b, c) =>
     c.winner.monthlyAvg < b.winner.monthlyAvg ? c : b, matrixCells[0]);
 
+  // ---------- Anchor & ranked alternatives ----------
+  const anchorScenario = useMemo(() =>
+    buildScenario(anchor.fuelKey, anchor.stateKey, anchor.price, {
+      annualKm, catalogueValue: anchor.catalogueValue ?? undefined,
+    }),
+    [anchor, annualKm]
+  );
+
+  function strategyOf(scenario, kind, switchY) {
+    if (kind === "private") return strategyPurePrivate(scenario, params, holdYears);
+    if (kind === "bv") return strategyPureBV(scenario, params, holdYears);
+    if (kind === "extension") return strategyExtension(scenario, params, holdYears, switchY ?? Math.ceil(holdYears / 2));
+    if (kind === "best") return findBestSwitchYear(scenario, params, holdYears).strategy
+      ?? strategyPurePrivate(scenario, params, holdYears);
+    throw new Error("unknown strategy " + kind);
+  }
+
+  const anchorStrat = useMemo(() => {
+    if (anchor.strategy === "best") {
+      const best = findBestSwitchYear(anchorScenario, params, holdYears);
+      const candidates = [
+        strategyPurePrivate(anchorScenario, params, holdYears),
+        strategyPureBV(anchorScenario, params, holdYears),
+        best.strategy,
+      ].filter(Boolean);
+      return candidates.reduce((b, s) => s.totalCost < b.totalCost ? s : b, candidates[0]);
+    }
+    return strategyOf(anchorScenario, anchor.strategy);
+  }, [anchorScenario, anchor.strategy, params, holdYears]);
+
+  // Net wealth change = total paid out − residual personally retained.
+  // This is the actual money you lose over the period.
+  const netWealthCost = (s) => s.totalCost - s.residualPersonal;
+  const anchorNet = netWealthCost(anchorStrat);
+
+  // Build the universe of alternatives at typical prices (best-of-3 strategies per cell).
+  const alternatives = useMemo(() => {
+    const out = [];
+    for (const fk of FUEL_ORDER) for (const sk of STATE_ORDER) {
+      const cell = matrix[fk][sk];
+      // Skip the anchor itself.
+      const isAnchor = fk === anchor.fuelKey && sk === anchor.stateKey
+        && Math.abs(cell.price - anchor.price) < 1;
+      out.push({
+        fuelKey: fk, stateKey: sk, price: cell.price,
+        winner: cell.winner, isAnchor,
+        netWealthCost: netWealthCost(cell.winner),
+        deltaMonthly: cell.winner.monthlyAvg - anchorStrat.monthlyAvg,
+        deltaTotal: cell.winner.totalCost - anchorStrat.totalCost,
+        deltaNet: netWealthCost(cell.winner) - anchorNet,
+      });
+    }
+    return out.sort((a, b) => a.netWealthCost - b.netWealthCost);
+  }, [matrix, anchorStrat, anchorNet, anchor.fuelKey, anchor.stateKey, anchor.price]);
+
+  const anchorRank = alternatives.filter(a => !a.isAnchor)
+    .findIndex(a => a.netWealthCost > anchorNet) + 1;
+  const betterThanAnchor = alternatives.filter(a => !a.isAnchor && a.netWealthCost < anchorNet);
+  const top3Better = betterThanAnchor.slice(0, 3);
+
   const setActiveCell = (fuelKey, stateKey) => {
     setActiveFuel(fuelKey);
     setActiveState(stateKey);
@@ -458,11 +526,126 @@ export default function CarComparison() {
             DGA Auto Vergelijking · NL 2026 rules
           </div>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900, color: "#f0f0f0", letterSpacing: -0.5 }}>
-            BV vs Private — and the buyout-and-extend tactic
+            Is anything actually better than my baseline plan?
           </h1>
           <p style={{ margin: "8px 0 0", fontSize: 14, color: "#aaa", lineHeight: 1.55 }}>
-            For each fuel × age combo, three strategies are compared: <strong style={{ color: "#e67e22" }}>Pure Private</strong> · <strong style={{ color: "#1abc9c" }}>Pure BV</strong> · <strong style={{ color: "#f1c40f" }}>BV → buy out at FMV → continue Private</strong>. The buyout tactic dodges bijtelling and pseudo-eindheffing in the late years and avoids the box 2 hit on residual value.
+            Pin a baseline (e.g. €8k Used Petrol Private cash) and the calculator ranks every other (fuel × age × strategy) combo by <strong style={{ color: "#f1c40f" }}>net wealth change over the hold period</strong> — total paid minus the residual asset value you keep. Strategies compared per scenario: <strong style={{ color: "#e67e22" }}>Pure Private</strong> · <strong style={{ color: "#1abc9c" }}>Pure BV</strong> · <strong style={{ color: "#f1c40f" }}>BV → buy out at FMV → continue Private</strong>.
           </p>
+        </div>
+
+        {/* === ANCHOR & RANKED ALTERNATIVES === */}
+        <div style={{
+          background: "#0a1014", border: "1px solid #1abc9c",
+          borderRadius: 10, padding: 16, marginBottom: 16,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12, color: "#1abc9c", letterSpacing: 3, textTransform: "uppercase" }}>
+              ★ Your baseline plan vs everything else
+            </div>
+            <button onClick={() => setAnchor({
+              fuelKey: activeFuel, stateKey: activeState, price: customPrice,
+              strategy: "best", catalogueValue: customCatalogue,
+            })} style={{
+              background: "transparent", color: "#1abc9c", border: "1px solid #1abc9c",
+              borderRadius: 4, padding: "4px 10px", fontSize: 11, cursor: "pointer",
+              fontWeight: 700, letterSpacing: 1, textTransform: "uppercase",
+            }}>Pin current scenario as baseline</button>
+          </div>
+
+          {/* Anchor summary row */}
+          <div style={{
+            background: "#0d141a", border: "1px solid #16a085",
+            borderRadius: 8, padding: 12, marginBottom: 12,
+            display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12, alignItems: "center",
+          }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>Baseline</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#1abc9c" }}>
+                {STATES[anchor.stateKey].label} {FUELS[anchor.fuelKey].label} · {anchor.strategy === "private" ? "Private" : anchor.strategy === "bv" ? "BV" : anchor.strategy === "extension" ? "BV→Pv ext." : "Best strategy"}
+              </div>
+              <div style={{ fontSize: 11, color: "#888" }}>
+                {fmt(anchor.price)} · {holdYears}y hold · {annualKm.toLocaleString()} km/yr
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: 1, textTransform: "uppercase" }}>Avg/mo</div>
+              <div style={{ fontSize: 18, color: "#1abc9c", fontWeight: 800 }}>{fmt(anchorStrat.monthlyAvg)}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: 1, textTransform: "uppercase" }}>Total {holdYears}y</div>
+              <div style={{ fontSize: 18, color: "#1abc9c", fontWeight: 800 }}>{fmt(anchorStrat.totalCost)}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "#888", letterSpacing: 1, textTransform: "uppercase" }}>Net wealth lost</div>
+              <div style={{ fontSize: 18, color: "#1abc9c", fontWeight: 900 }}>{fmt(anchorNet)}</div>
+              <div style={{ fontSize: 9, color: "#666" }}>= total − residual {fmt(anchorStrat.residualPersonal)}</div>
+            </div>
+          </div>
+
+          {/* Verdict + top alternatives */}
+          {betterThanAnchor.length === 0 ? (
+            <div style={{
+              background: "#001a14", border: "1px solid #27ae60",
+              borderRadius: 6, padding: "12px 14px",
+              fontSize: 13, color: "#27ae60", lineHeight: 1.6,
+            }}>
+              ✓ <strong>Your baseline plan wins.</strong> No prebaked alternative has a lower net wealth cost over {holdYears} years. Stick with the plan, or try changing the inputs (km/yr, hold period, pseudo-eindheffing toggle) to stress-test it.
+            </div>
+          ) : (
+            <>
+              <div style={{
+                background: "#1a1500", border: "1px solid #f1c40f",
+                borderRadius: 6, padding: "12px 14px", marginBottom: 10,
+                fontSize: 13, color: "#e0e0e0", lineHeight: 1.6,
+              }}>
+                <strong style={{ color: "#f1c40f" }}>{betterThanAnchor.length} alternative{betterThanAnchor.length > 1 ? "s" : ""} beat your baseline</strong> on net wealth over {holdYears}y. Top picks below — note the ones that need a bigger upfront budget.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {top3Better.map((alt, i) => {
+                  const sc = matrix[alt.fuelKey][alt.stateKey];
+                  const w = sc.winner;
+                  const upfrontDelta = alt.price - anchor.price;
+                  return (
+                    <div key={`${alt.fuelKey}-${alt.stateKey}`} onClick={() => setActiveCell(alt.fuelKey, alt.stateKey)} style={{
+                      background: "#0d0d1a", border: `1px solid ${FUELS[alt.fuelKey].color}55`,
+                      borderRadius: 6, padding: 10, cursor: "pointer",
+                      display: "grid", gridTemplateColumns: "auto 1fr auto auto auto", gap: 12, alignItems: "center",
+                    }}>
+                      <div style={{
+                        background: i === 0 ? "#27ae60" : "#444", color: "#fff",
+                        borderRadius: 12, width: 24, height: 24, display: "flex",
+                        alignItems: "center", justifyContent: "center",
+                        fontSize: 11, fontWeight: 800,
+                      }}>#{i + 1}</div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: FUELS[alt.fuelKey].color }}>
+                          {STATES[alt.stateKey].label} {FUELS[alt.fuelKey].label} · {w.key === "extension" ? `BV→Pv@y${sc.switchYear}` : (w.key === "bv" ? "BV" : "Private")}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888" }}>
+                          {fmt(alt.price)} purchase {upfrontDelta > 0 && <span style={{ color: "#f1c40f" }}>(+{fmt(upfrontDelta)} vs baseline)</span>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 10, color: "#666", textTransform: "uppercase", letterSpacing: 1 }}>Avg/mo</div>
+                        <div style={{ fontSize: 14, color: "#e0e0e0", fontWeight: 700 }}>{fmt(w.monthlyAvg)}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 10, color: "#666", textTransform: "uppercase", letterSpacing: 1 }}>Net {holdYears}y</div>
+                        <div style={{ fontSize: 14, color: "#e0e0e0", fontWeight: 700 }}>{fmt(alt.netWealthCost)}</div>
+                      </div>
+                      <div style={{ textAlign: "right", minWidth: 70 }}>
+                        <div style={{ fontSize: 10, color: "#666", textTransform: "uppercase", letterSpacing: 1 }}>Δ vs base</div>
+                        <div style={{ fontSize: 14, color: "#27ae60", fontWeight: 800 }}>−{fmt(Math.abs(alt.deltaNet))}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
+            <strong style={{ color: "#aaa" }}>Net wealth lost</strong> = what you actually pay out over {holdYears} years − the personal-equivalent residual value you walk away with. For BV path, residual is clipped by box 2 ({Math.round((1-box2Rate)*100)}%) on extraction. <strong style={{ color: "#aaa" }}>Avg/mo</strong> ignores residual and overstates the gap between high- and low-residual options.
+          </div>
         </div>
 
         {/* Settings */}
@@ -607,6 +790,16 @@ export default function CarComparison() {
           <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>
             {FUELS[activeFuel].note} — {STATES[activeState].note}
           </div>
+          {activeState === "used" && customPrice <= 10000 && (
+            <div style={{
+              background: "#1a0a00", border: "1px solid #c0392b55",
+              borderRadius: 6, padding: "10px 12px", marginBottom: 12,
+              fontSize: 12, color: "#e0c8b8", lineHeight: 1.55,
+            }}>
+              <strong style={{ color: "#e74c3c" }}>⚠ Maintenance variance on cheap used cars: </strong>
+              At this price tier, one major repair (transmission, EV battery degradation, hybrid inverter) can swing total cost by <strong>€1,500–€4,000</strong>. The €{STATES.used.annualMaintenance}/yr maintenance assumed here is the <em>typical</em> case; budget a contingency or get a pre-purchase inspection. This applies symmetrically to BV and Private — it doesn't change which path wins, but the absolute numbers can move.
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Purchase price</label>
