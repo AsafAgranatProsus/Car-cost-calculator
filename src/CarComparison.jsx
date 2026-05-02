@@ -43,30 +43,36 @@ function bijtellingMarginalRate(salary, use30Ruling, annualBijtelling) {
 // ============================================================================
 // Catalog of fuels and ages
 // ============================================================================
+// Each fuel has a base (mixed-use) cost and city/highway multipliers.
+// At highwayPct=0.5 the multiplier is 1.0 (backward-compatible with old defaults).
 const FUELS = {
   petrol: {
     label: "Petrol", short: "Petrol",
     color: "#c0392b", accent: "#e74c3c",
     isEV: false, isPHEV: false, fuelCostPer10k: 1100,
+    cityMult: 1.15, highwayMult: 0.90,
     note: "Pure ICE — long range, simplest. Full pseudo-eindheffing exposure from 2027 (BV path).",
   },
   hybrid: {
     label: "Self-charging Hybrid", short: "Hybrid",
     color: "#d35400", accent: "#e67e22",
     isEV: false, isPHEV: false, fuelCostPer10k: 850,
-    note: "No plug. Best mixed-use balance: quiet city, fuel-efficient, highway-capable. 2027 pseudo-eindheffing applies (BV).",
+    cityMult: 0.85, highwayMult: 1.20,
+    note: "No plug. Excellent in city (regen + engine-off), but hybrid system gives little benefit on steady-state highway. 2027 pseudo-eindheffing applies (BV).",
   },
   phev: {
     label: "Plug-in Hybrid (PHEV)", short: "PHEV",
     color: "#8e44ad", accent: "#9b59b6",
     isEV: false, isPHEV: true, fuelCostPer10k: 750,
+    cityMult: 0.50, highwayMult: 1.80,
     note: "Heavier weight class → MRB ~25% higher than petrol from 2026 (lost ¾-rate). Same 22% bijtelling. Long highway trips with full load = mostly running on petrol while carrying battery weight.",
   },
   ev: {
     label: "EV", short: "EV",
     color: "#16a085", accent: "#1abc9c",
     isEV: true, isPHEV: false, fuelCostPer10k: 350,
-    note: "Cheapest per km, MRB 30% discount, exempt from 2027 pseudo-eindheffing. Long EU trips with full family load = real charging-stop planning + 25–35% range loss.",
+    cityMult: 0.75, highwayMult: 1.50,
+    note: "Cheapest per km, MRB 30% discount, exempt from 2027 pseudo-eindheffing. Highway speed + full load = real charging-stop planning, 25–35% range loss; aero drag dominates so highway costs a lot more energy than city.",
   },
 };
 const FUEL_ORDER = ["petrol", "hybrid", "phev", "ev"];
@@ -148,7 +154,7 @@ function resaleAtAge(price, resaleFraction, years) {
 //   bvFactor = (1 − VPB) × (1 − box2) — the rate at which BV cash translates to personal cost
 function calcSegment(scenario, type, params, startPrice, years) {
   const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate, cashRetentionMode,
-    oilStress = 1.0, bvProfitable = true } = params;
+    oilStress = 1.0, bvProfitable = true, highwayPct = 0.5 } = params;
   // If user plans to leave BV cash inside the BV (no dividend in foreseeable future),
   // box 2 doesn't apply to ongoing operating costs OR to residual extraction.
   // The "extract" mode is the default conservative assumption.
@@ -159,7 +165,18 @@ function calcSegment(scenario, type, params, startPrice, years) {
   const months = years * 12;
   // Oil-stress multiplier applies to ICE fuels; EV charging cost is much less sensitive.
   const fuelStressMult = scenario.isEV ? 1 + (oilStress - 1) * 0.15 : oilStress;
-  const annualFuel = (scenario.fuel.fuelCostPer10k * fuelStressMult * scenario.annualKm) / 10000;
+  // Usage-mix multiplier: linearly blends each fuel's city vs highway efficiency.
+  // highwayPct=0 → pure city, =1 → pure highway, =0.5 → mixed (multiplier = 1).
+  const cityMult = scenario.fuel.cityMult ?? 1;
+  const highwayMult = scenario.fuel.highwayMult ?? 1;
+  const usageMult = cityMult * (1 - highwayPct) * 2 * 0.5 + highwayMult * highwayPct * 2 * 0.5;
+  // Simpler equivalent: linear interpolation between city and highway multipliers.
+  // We rescale so that highwayPct=0.5 yields exactly 1.0 (anchor to mixed-use defaults).
+  const rawMix = cityMult * (1 - highwayPct) + highwayMult * highwayPct;
+  const anchorAtHalf = (cityMult + highwayMult) / 2;
+  const mixMult = anchorAtHalf > 0 ? rawMix / anchorAtHalf : 1;
+  const annualFuel = (scenario.fuel.fuelCostPer10k * fuelStressMult * mixMult * scenario.annualKm) / 10000;
+  void usageMult;
   const annualRunning = annualFuel + scenario.annualMaintenance;
   const annualMRB = getMRBMonthly(scenario) * 12;
   const endResale = resaleAtAge(startPrice, scenario.resaleFraction, years);
@@ -389,6 +406,7 @@ export default function CarComparison() {
   const [cashRetentionMode, setCashRetentionMode] = useState("extract");
   const [oilStress, setOilStress] = useState(1.0);
   const [bvProfitable, setBvProfitable] = useState(true);
+  const [highwayPct, setHighwayPct] = useState(0.5);
 
   // Default ANCHOR = the user's baseline plan: Used Petrol Private @ €8k cash, 5y.
   const [activeFuel, setActiveFuel] = useState("petrol");
@@ -408,8 +426,8 @@ export default function CarComparison() {
 
   const params = useMemo(() => ({
     grossSalary, use30Ruling, financeMode,
-    pseudoEindheffing: effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable,
-  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable]);
+    pseudoEindheffing: effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable, highwayPct,
+  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate, cashRetentionMode, oilStress, bvProfitable, highwayPct]);
 
   const taxableAfter = taxableAfterRuling(grossSalary, use30Ruling);
 
@@ -761,6 +779,47 @@ export default function CarComparison() {
               sub={bvProfitable
                 ? "Default — €1 BV expense saves €0.19 corporate tax"
                 : "Profit-risk mode — VPB benefit set to 0; BV path becomes much worse"} />
+          </div>
+
+          {/* Usage mix — city vs highway */}
+          <div style={{ gridColumn: "1 / -1", paddingTop: 8, borderTop: "1px dashed #222" }}>
+            <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>
+              Driving mix · city ↔ highway
+            </label>
+            <input type="range" min={0} max={1} step={0.05} value={highwayPct}
+              onChange={e => setHighwayPct(+e.target.value)}
+              style={{ width: "100%", accentColor: "#9b59b6" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 14, color: "#9b59b6", fontWeight: 700 }}>
+                {Math.round((1 - highwayPct) * 100)}% city / {Math.round(highwayPct * 100)}% highway
+              </div>
+              <div style={{ fontSize: 11, color: "#888" }}>
+                {highwayPct >= 0.7
+                  ? "Holiday-trip / commuter pattern → hybrid advantage shrinks; EV range loss grows."
+                  : highwayPct <= 0.3
+                  ? "City-heavy → hybrid shines (regen + engine-off); EV most efficient."
+                  : "Mixed use → calculator's anchored defaults apply."}
+              </div>
+            </div>
+            {/* Live multiplier readout per fuel */}
+            <div style={{ marginTop: 6, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+              {FUEL_ORDER.map(fk => {
+                const fuel = FUELS[fk];
+                const raw = fuel.cityMult * (1 - highwayPct) + fuel.highwayMult * highwayPct;
+                const anchor = (fuel.cityMult + fuel.highwayMult) / 2;
+                const mult = anchor > 0 ? raw / anchor : 1;
+                const pct = Math.round((mult - 1) * 100);
+                const tone = pct > 5 ? "#e74c3c" : pct < -5 ? "#27ae60" : "#888";
+                return (
+                  <div key={fk} style={{ background: "#0a0a14", borderRadius: 6, padding: "6px 8px" }}>
+                    <div style={{ fontSize: 10, color: fuel.color, textTransform: "uppercase", letterSpacing: 1 }}>{fuel.short}</div>
+                    <div style={{ fontSize: 13, color: tone, fontWeight: 700 }}>
+                      {pct > 0 ? "+" : ""}{pct}% fuel
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
