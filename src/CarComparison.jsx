@@ -52,18 +52,19 @@ function getBijtellingRate(scenario, catalogueValue) {
   return 0.22;
 }
 
-function getMRBMonthly(scenario) {
-  if (scenario.type === "private") return 85;
-  if (!scenario.isEV) return 85;
-  return Math.round(85 * 0.70);
+function getMRBMonthly(scenario, isPHEV = false) {
+  if (scenario.isEV) return Math.round(85 * 0.70);
+  if (isPHEV && !scenario.isEV) return 115;
+  return 85;
 }
 
 function calcMonthlyCosts(scenario, params) {
-  const { grossSalary, use30Ruling, includePrivateFinancing, holdYears, pseudoEindheffing } = params;
+  const { grossSalary, use30Ruling, includePrivateFinancing, holdYears, pseudoEindheffing, isPHEV } = params;
   const cat = scenario.catalogueValue;
   const price = scenario.carPrice;
   const baseMarginalRate = grossSalary > 75000 ? 0.495 : 0.369;
   const effectiveMarginalRate = use30Ruling ? baseMarginalRate * 0.70 : baseMarginalRate;
+  const effectiveIsPHEV = isPHEV && !scenario.isEV;
 
   if (scenario.type === "bv") {
     const bijtellingRate = getBijtellingRate(scenario, cat);
@@ -71,7 +72,7 @@ function calcMonthlyCosts(scenario, params) {
     const monthlyBijtellingTax = (annualBijtelling * effectiveMarginalRate) / 12;
     const annualDepreciation = price / 5;
     const annualRunning = scenario.annualFuelCost + scenario.annualMaintenance;
-    const annualMRB = getMRBMonthly(scenario) * 12;
+    const annualMRB = getMRBMonthly(scenario, effectiveIsPHEV) * 12;
     const totalAnnualBVCost = annualDepreciation + annualRunning + annualMRB;
     const vpbSaving = totalAnnualBVCost * 0.19;
     const monthlyOpportunityCost = (price * 0.04) / 12 * (1 - 0.19);
@@ -84,7 +85,7 @@ function calcMonthlyCosts(scenario, params) {
     return {
       monthlyBijtellingTax: Math.round(monthlyBijtellingTax),
       monthlyRunning: Math.round((annualRunning * (1 - 0.19)) / 12),
-      monthlyMRB: Math.round(getMRBMonthly(scenario) * (1 - 0.19)),
+      monthlyMRB: Math.round(getMRBMonthly(scenario, effectiveIsPHEV) * (1 - 0.19)),
       monthlyDepreciation: Math.round((annualDepreciation * (1 - 0.19)) / 12),
       monthlyResaleBenefit: Math.round(monthlyResaleBenefit),
       monthlyPseudo: Math.round(monthlyPseudo),
@@ -99,7 +100,7 @@ function calcMonthlyCosts(scenario, params) {
     const annualFinancing = includePrivateFinancing ? price * 0.06 : price / holdYears;
     const monthlyFinancing = annualFinancing / 12;
     const monthlyRunning = (scenario.annualFuelCost + scenario.annualMaintenance) / 12;
-    const monthlyMRB = getMRBMonthly(scenario);
+    const monthlyMRB = getMRBMonthly(scenario, effectiveIsPHEV);
     const resaleValue = price * Math.pow(scenario.resaleFraction, holdYears / 4);
     const monthlyResaleBenefit = resaleValue / (holdYears * 12);
     const totalMonthlyPersonal = monthlyFinancing + monthlyRunning + monthlyMRB - monthlyResaleBenefit;
@@ -116,7 +117,7 @@ function calcMonthlyCosts(scenario, params) {
 
 const BarRow = ({ label, value, max, color, negative }) => (
   <div style={{ marginBottom: 7 }}>
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#888", marginBottom: 2 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#aaa", marginBottom: 2 }}>
       <span>{label}</span>
       <span style={{ color: negative ? "#27ae60" : "#ccc", fontWeight: 600 }}>
         {negative ? "-" : ""}€{Math.abs(value)}/mo
@@ -147,7 +148,7 @@ const Toggle = ({ value, onChange, color, label, sub }) => (
     </div>
     <div>
       <div style={{ fontSize: 14, color: value ? color : "#666" }}>{label}</div>
-      <div style={{ fontSize: 12, color: "#444" }}>{sub}</div>
+      <div style={{ fontSize: 12, color: "#888" }}>{sub}</div>
     </div>
   </div>
 );
@@ -158,10 +159,11 @@ export default function CarComparison() {
   const [holdYears, setHoldYears] = useState(4);
   const [includePrivateFinancing, setIncludePrivateFinancing] = useState(true);
   const [pseudoEindheffing, setPseudoEindheffing] = useState(false);
+  const [isPHEV, setIsPHEV] = useState(false);
   const [activeScenario, setActiveScenario] = useState("ev-used-older");
   const [cheapPetrolPrice, setCheapPetrolPrice] = useState(14000);
 
-  const params = { grossSalary, use30Ruling, includePrivateFinancing, holdYears, pseudoEindheffing };
+  const params = { grossSalary, use30Ruling, includePrivateFinancing, holdYears, pseudoEindheffing, isPHEV };
 
   const cheapPetrolScenario = useMemo(() => ({
     id: "petrol-cheap",
@@ -179,7 +181,7 @@ export default function CarComparison() {
 
   const results = useMemo(() =>
     allScenarios.map(s => ({ ...s, calc: calcMonthlyCosts(s, params) })),
-    [allScenarios, grossSalary, use30Ruling, holdYears, includePrivateFinancing, pseudoEindheffing]
+    [allScenarios, grossSalary, use30Ruling, holdYears, includePrivateFinancing, pseudoEindheffing, isPHEV]
   );
 
   const evBenchmark = results.find(r => r.id === "ev-used-older");
@@ -196,20 +198,25 @@ export default function CarComparison() {
   const active = results.find(r => r.id === activeScenario);
 
   return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+        * { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif !important; }
+      `}</style>
     <div style={{
-      fontFamily: "'Courier New', monospace",
+      fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif",
       background: "#0d0d1a", minHeight: "100vh",
       color: "#e0e0e0", padding: "24px 16px", fontSize: 16,
     }}>
       {/* Header */}
       <div style={{ marginBottom: 24, borderBottom: "1px solid #222", paddingBottom: 16 }}>
-        <div style={{ fontSize: 12, letterSpacing: 4, color: "#555", textTransform: "uppercase", marginBottom: 6 }}>
+        <div style={{ fontSize: 12, letterSpacing: 4, color: "#999", textTransform: "uppercase", marginBottom: 6 }}>
           NANS B.V. · AUTO VERGELIJKING 2026
         </div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: "#f0f0f0", letterSpacing: -0.5 }}>
           Monthly Car Cost Calculator
         </h1>
-        <p style={{ margin: "6px 0 0", fontSize: 14, color: "#666" }}>True monthly cost as DGA / employee after tax</p>
+        <p style={{ margin: "6px 0 0", fontSize: 14, color: "#aaa" }}>True net monthly cost as DGA / employee after tax</p>
       </div>
 
       {/* Controls */}
@@ -219,13 +226,13 @@ export default function CarComparison() {
         display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14,
       }}>
         <div>
-          <label style={{ fontSize: 12, color: "#555", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>DGA Gross Salary</label>
+          <label style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>DGA Gross Salary</label>
           <input type="range" min={56000} max={150000} step={2000} value={grossSalary}
             onChange={e => setGrossSalary(+e.target.value)} style={{ width: "100%", accentColor: "#3498db" }} />
           <div style={{ fontSize: 16, color: "#3498db", fontWeight: 700 }}>€{grossSalary.toLocaleString()}/yr</div>
         </div>
         <div>
-          <label style={{ fontSize: 12, color: "#555", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Hold Period</label>
+          <label style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Hold Period</label>
           <input type="range" min={2} max={7} step={1} value={holdYears}
             onChange={e => setHoldYears(+e.target.value)} style={{ width: "100%", accentColor: "#e74c3c" }} />
           <div style={{ fontSize: 16, color: "#e74c3c", fontWeight: 700 }}>{holdYears} years</div>
@@ -241,6 +248,22 @@ export default function CarComparison() {
             label="Include 2027 pseudo-eindheffing (+12%/yr, petrol BV only)"
             sub={pseudoEindheffing ? "Applied — EVs still exempt" : "Off — assumes transition rule (register before Dec 2026)"} />
         </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Toggle value={isPHEV} onChange={setIsPHEV} color="#8e44ad"
+            label="Petrol scenarios = Plug-in Hybrid (PHEV)"
+            sub={isPHEV
+              ? "PHEV: MRB ~€115/mo (heavier weight class, no discount from 2026) · bijtelling same 22%"
+              : "Self-charging hybrid: MRB ~€85/mo, no weight penalty · recommended for your use case"} />
+          {isPHEV && (
+            <div style={{
+              marginTop: 8, padding: "8px 12px", borderRadius: 6,
+              background: "#1a0a2a", border: "1px solid #8e44ad40",
+              fontSize: 12, color: "#9b59b6", lineHeight: 1.6,
+            }}>
+              ⚠ PHEV note: The MRB weight penalty (+~€30/mo) applies from 2026 with no discount. For long EU trips with full camping load, you'll also run mostly on petrol anyway — reducing the fuel saving benefit that justifies the higher purchase price of a PHEV vs self-charging hybrid.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Crossover Explorer */}
@@ -253,7 +276,7 @@ export default function CarComparison() {
         <div style={{ fontSize: 12, color: "#f39c12", letterSpacing: 3, textTransform: "uppercase", marginBottom: 12 }}>
           ★ Cheap Petrol Crossover Explorer
         </div>
-        <label style={{ fontSize: 12, color: "#666", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+        <label style={{ fontSize: 12, color: "#aaa", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
           Drag to find the crossover vs. Used EV (2022–23)
         </label>
         <input type="range" min={4000} max={28000} step={500} value={cheapPetrolPrice}
@@ -261,7 +284,7 @@ export default function CarComparison() {
           style={{ width: "100%", accentColor: "#f39c12" }} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
           <div style={{ fontSize: 22, color: "#f39c12", fontWeight: 900 }}>€{cheapPetrolPrice.toLocaleString()}</div>
-          <div style={{ fontSize: 12, color: "#555" }}>orig. catalogue ~€{Math.round(cheapPetrolPrice * 1.6).toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: "#999" }}>orig. catalogue ~€{Math.round(cheapPetrolPrice * 1.6).toLocaleString()}</div>
         </div>
 
         {/* Verdict bar */}
@@ -276,7 +299,7 @@ export default function CarComparison() {
             <div style={{ fontSize: 14, color: isCheaperThanEV ? "#27ae60" : "#e67e22", fontWeight: 700, marginBottom: 3 }}>
               {isCheaperThanEV ? "✓ Beats the Used EV benchmark" : "✗ Still more expensive than Used EV"}
             </div>
-            <div style={{ fontSize: 12, color: "#555" }}>
+            <div style={{ fontSize: 12, color: "#999" }}>
               {cheapPetrolScenario.sublabel} · {pseudoEindheffing ? "pseudo-eindheffing ON" : "transition rule assumed"}
             </div>
           </div>
@@ -284,7 +307,7 @@ export default function CarComparison() {
             <div style={{ fontSize: 26, fontWeight: 900, color: isCheaperThanEV ? "#27ae60" : "#e67e22", lineHeight: 1 }}>
               {gap > 0 ? "+" : ""}{gap}/mo
             </div>
-            <div style={{ fontSize: 11, color: "#444" }}>vs EV benchmark</div>
+            <div style={{ fontSize: 11, color: "#888" }}>vs EV benchmark</div>
           </div>
         </div>
 
@@ -294,14 +317,26 @@ export default function CarComparison() {
             onClick={() => setActiveScenario("petrol-cheap")}>
             <div style={{ fontSize: 11, color: "#f39c12", marginBottom: 2 }}>Cheap Petrol BV</div>
             <div style={{ fontSize: 28, fontWeight: 900, color: "#f39c12" }}>€{cheapPetrolResult.calc.totalMonthlyPersonal}</div>
-            <div style={{ fontSize: 11, color: "#555" }}>/month · tap to inspect</div>
+            <div style={{ fontSize: 11, color: "#999" }}>/month · tap to inspect</div>
           </div>
           <div style={{ background: "#001a10", borderRadius: 6, padding: 10, cursor: "pointer" }}
             onClick={() => setActiveScenario("ev-used-older")}>
             <div style={{ fontSize: 11, color: "#1abc9c", marginBottom: 2 }}>Used EV (2022–23) BV</div>
             <div style={{ fontSize: 28, fontWeight: 900, color: "#1abc9c" }}>€{evBenchmark.calc.totalMonthlyPersonal}</div>
-            <div style={{ fontSize: 11, color: "#555" }}>/month · tap to inspect</div>
+            <div style={{ fontSize: 11, color: "#999" }}>/month · tap to inspect</div>
           </div>
+        </div>
+
+        {/* 30% ruling insight note */}
+        <div style={{
+          marginTop: 10, padding: "10px 12px", borderRadius: 6,
+          background: "#0a0a1a", border: "1px solid #3498db30",
+          fontSize: 12, color: "#7fb3d3", lineHeight: 1.6,
+        }}>
+          <span style={{ color: "#3498db", fontWeight: 700 }}>💡 30% ruling effect on this gap: </span>
+          {use30Ruling
+            ? "Your ruling shelters the EV's larger bijtelling income more than petrol's — so the EV benefits more from it. Toggle the ruling off above to see the gap narrow: without it, the EV gets comparatively more expensive."
+            : "Without your ruling, the EV's large bijtelling base (€34k × 17%) gets taxed at full 49.5% — costing you more than the ruling-active scenario. The gap vs petrol narrows because petrol's lower bijtelling base is hit less hard. This is what happens when your ruling expires."}
         </div>
       </div>
 
@@ -329,11 +364,11 @@ export default function CarComparison() {
                 {r.tag} · {r.type === "bv" ? "BV" : "Private"}
               </div>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", marginBottom: 1 }}>{r.label}</div>
-              <div style={{ fontSize: 12, color: "#555", marginBottom: 8 }}>{r.sublabel}</div>
+              <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>{r.sublabel}</div>
               <div style={{ fontSize: 28, fontWeight: 900, color: r.color, lineHeight: 1 }}>
                 €{r.calc.totalMonthlyPersonal}
               </div>
-              <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>/month to you</div>
+              <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>/month to you</div>
               <div style={{ marginTop: 8, height: 3, background: "#1a1a2e", borderRadius: 2 }}>
                 <div style={{
                   width: `${(r.calc.totalMonthlyPersonal / maxMonthly) * 100}%`,
@@ -364,13 +399,13 @@ export default function CarComparison() {
               { label: "VPB saving/yr", value: active.type === "bv" ? `€${active.calc.vpbSaving.toLocaleString()}` : "—", sub: "19% on BV costs" },
             ].map((item, i) => (
               <div key={i} style={{ background: "#0d0d1a", borderRadius: 6, padding: 10 }}>
-                <div style={{ fontSize: 11, color: "#555", textTransform: "uppercase", letterSpacing: 1 }}>{item.label}</div>
+                <div style={{ fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: 1 }}>{item.label}</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "#e0e0e0", marginTop: 2 }}>{item.value}</div>
-                <div style={{ fontSize: 11, color: "#444" }}>{item.sub}</div>
+                <div style={{ fontSize: 11, color: "#888" }}>{item.sub}</div>
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 12, color: "#555", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Monthly components</div>
+          <div style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Monthly components</div>
           {active.calc.monthlyBijtellingTax > 0 && <BarRow label="Bijtelling income tax" value={active.calc.monthlyBijtellingTax} max={maxBarValue} color={active.color} />}
           {active.calc.monthlyPseudo > 0 && <BarRow label="Pseudo-eindheffing (BV)" value={active.calc.monthlyPseudo} max={maxBarValue} color="#e67e22" />}
           <BarRow label="Fuel / charging" value={Math.round(active.annualFuelCost / 12)} max={maxBarValue} color={active.color} />
@@ -382,9 +417,9 @@ export default function CarComparison() {
             display: "flex", justifyContent: "space-between", alignItems: "center",
             borderTop: `1px solid ${active.color}30`, paddingTop: 10, marginTop: 8
           }}>
-            <div style={{ fontSize: 13, color: "#666", textTransform: "uppercase", letterSpacing: 2 }}>Total monthly to you</div>
+            <div style={{ fontSize: 13, color: "#aaa", textTransform: "uppercase", letterSpacing: 2 }}>Total monthly to you</div>
             <div style={{ fontSize: 32, fontWeight: 900, color: active.color }}>
-              €{active.calc.totalMonthlyPersonal}<span style={{ fontSize: 14, color: "#555" }}>/mo</span>
+              €{active.calc.totalMonthlyPersonal}<span style={{ fontSize: 14, color: "#999" }}>/mo</span>
             </div>
           </div>
         </div>
@@ -399,15 +434,15 @@ export default function CarComparison() {
           {results.filter(r => r.type === "bv").map(r => (
             <div key={r.id} style={{ fontSize: 13 }}>
               <span style={{ color: r.accent }}>{r.label.split(" ").slice(0, 2).join(" ")}</span>
-              <span style={{ color: "#555" }}> → </span>
+              <span style={{ color: "#999" }}> → </span>
               <span style={{ color: "#e0e0e0", fontWeight: 700 }}>
                 €{Math.round(r.carPrice * Math.pow(r.resaleFraction, holdYears / 4)).toLocaleString()}
               </span>
-              <span style={{ color: "#444", fontSize: 11 }}> est.</span>
+              <span style={{ color: "#888", fontSize: 11 }}> est.</span>
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: "#444", lineHeight: 1.5 }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: "#888", lineHeight: 1.5 }}>
           EVs from 2022+ hold residual value better as EU 2035 combustion ban approaches. Older petrol ~48–52% after 4 yrs.
         </div>
       </div>
@@ -424,9 +459,10 @@ export default function CarComparison() {
         </div>
       </div>
 
-      <div style={{ fontSize: 11, color: "#333", textAlign: "center", lineHeight: 1.6 }}>
+      <div style={{ fontSize: 11, color: "#777", textAlign: "center", lineHeight: 1.6 }}>
         Estimates only · Consult your accountant · MRB ~1,700kg NL avg · Catalogue = original reg year value · BV costs net 19% VPB
       </div>
     </div>
+    </>
   );
 }
