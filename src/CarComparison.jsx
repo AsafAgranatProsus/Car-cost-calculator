@@ -147,7 +147,11 @@ function resaleAtAge(price, resaleFraction, years) {
 // Returns absolute personal-equivalent costs (€, total over the segment).
 //   bvFactor = (1 − VPB) × (1 − box2) — the rate at which BV cash translates to personal cost
 function calcSegment(scenario, type, params, startPrice, years) {
-  const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate } = params;
+  const { grossSalary, use30Ruling, financeMode, pseudoEindheffing, box2Rate, cashRetentionMode } = params;
+  // If user plans to leave BV cash inside the BV (no dividend in foreseeable future),
+  // box 2 doesn't apply to ongoing operating costs OR to residual extraction.
+  // The "extract" mode is the default conservative assumption.
+  const effectiveBox2 = cashRetentionMode === "retain" ? 0 : box2Rate;
   const cat = scenario.catalogueValue;
   const months = years * 12;
   const annualFuel = (scenario.fuel.fuelCostPer10k * scenario.annualKm) / 10000;
@@ -164,17 +168,23 @@ function calcSegment(scenario, type, params, startPrice, years) {
     const marginalRate = bijtellingMarginalRate(grossSalary, use30Ruling, annualBijtelling);
     const annualBijtellingTax = annualBijtelling * marginalRate;
     const annualPseudo = (!scenario.isEV && pseudoEindheffing) ? cat * 0.12 : 0;
-    const bvFactor = (1 - VPB_RATE) * (1 - box2Rate);
+    const bvFactor = (1 - VPB_RATE) * (1 - effectiveBox2);
 
-    const annualPersonal =
-      annualBijtellingTax +
-      bvFactor * (annualDepreciation + annualRunning + annualMRB + annualOpportunity + annualPseudo);
+    // Gross BV expenses (deductible against VPB).
+    const annualBVGrossCost = annualDepreciation + annualRunning + annualMRB + annualOpportunity + annualPseudo;
+    const annualVPBSaving = annualBVGrossCost * VPB_RATE;
+    const annualBVCashAfterVPB = annualBVGrossCost - annualVPBSaving;
+    const annualBox2Drag = annualBVCashAfterVPB * effectiveBox2;
+
+    const annualPersonal = annualBijtellingTax + bvFactor * annualBVGrossCost;
 
     return {
       type: "bv", years, months, startPrice, endResale,
       bijtellingRate, annualBijtelling, marginalRate, annualBijtellingTax,
       annualPseudo, bvFactor,
       annualDepreciation, annualRunning, annualMRB, annualOpportunity,
+      annualVPBSaving, annualBVGrossCost, annualBVCashAfterVPB, annualBox2Drag,
+      effectiveBox2,
       monthly: {
         bijtellingTax: annualBijtellingTax / 12,
         pseudo: bvFactor * annualPseudo / 12,
@@ -183,13 +193,12 @@ function calcSegment(scenario, type, params, startPrice, years) {
         maintenance: bvFactor * scenario.annualMaintenance / 12,
         mrb: bvFactor * annualMRB / 12,
         capital: bvFactor * annualOpportunity / 12,
+        vpbSaving: -annualVPBSaving * (1 - effectiveBox2) / 12, // shown as a negative (offset)
         total: annualPersonal / 12,
       },
       total: annualPersonal * years,
-      // Walk-away: at end of segment the BV holds endResale cash-equivalent (the car).
-      // To convert to personal, dividend out → lose box 2.
-      walkAwayBVAsset: endResale,                             // car still in BV at this point
-      walkAwayPersonalIfExtracted: endResale * (1 - box2Rate),
+      walkAwayBVAsset: endResale,
+      walkAwayPersonalIfExtracted: endResale * (1 - effectiveBox2),
     };
   } else {
     const capitalRate = financeMode === "loan" ? LOAN_RATE : OPPORTUNITY_RATE;
@@ -221,6 +230,11 @@ function calcSegment(scenario, type, params, startPrice, years) {
 // ============================================================================
 function strategyPureBV(scenario, params, totalYears) {
   const seg = calcSegment(scenario, "bv", params, scenario.carPrice, totalYears);
+  const effectiveBox2 = params.cashRetentionMode === "retain" ? 0 : params.box2Rate;
+  const totalVPBSaving = seg.annualVPBSaving * totalYears;
+  const totalGrossBVCost = seg.annualBVGrossCost * totalYears;
+  const totalBijtellingTax = seg.annualBijtellingTax * totalYears;
+  const totalBox2Drag = seg.annualBox2Drag * totalYears;
   return {
     key: "bv", label: "BV for the whole period",
     color: "#1abc9c",
@@ -231,8 +245,12 @@ function strategyPureBV(scenario, params, totalYears) {
     residualPersonal: seg.walkAwayPersonalIfExtracted,
     residualGross: seg.endResale,
     residualLocation: "in BV",
-    residualNote: `Car worth €${Math.round(seg.endResale).toLocaleString()} but inside the BV. To get it (or its sale proceeds) into your personal hand, you'd dividend it out → lose ${Math.round(params.box2Rate*100)}% box 2.`,
-    netEconomicCost: seg.total - 0, // depreciation already nets the resale
+    residualNote: effectiveBox2 > 0
+      ? `Car worth €${Math.round(seg.endResale).toLocaleString()} sits in the BV. To extract it personally, you'd dividend out → lose ${Math.round(effectiveBox2*100)}% box 2.`
+      : `Car worth €${Math.round(seg.endResale).toLocaleString()} stays in the BV (cash-retain mode: no box 2 modeled until you actually dividend out).`,
+    netEconomicCost: seg.total,
+    totalGrossBVCost, totalVPBSaving, totalBijtellingTax, totalBox2Drag,
+    effectiveBox2,
   };
 }
 
@@ -292,7 +310,8 @@ function strategyExtensionWithPenalty(scenario, params, totalYears, switchYear) 
   const phase2Years = totalYears - switchYear;
   const phase2 = calcSegment(scenario, "private", params, fmv, phase2Years);
   // Personal-equiv impact of VPB cost on gain (paid by BV, eventually box-2 hits dividend extraction)
-  const vpbCostPersonalEquiv = vpbCostOnGain * (1 - params.box2Rate);
+  const effectiveBox2 = params.cashRetentionMode === "retain" ? 0 : params.box2Rate;
+  const vpbCostPersonalEquiv = vpbCostOnGain * (1 - effectiveBox2);
   return {
     key: "extensionPenalty",
     totalCost: phase1.total + phase2.total + vpbCostPersonalEquiv,
@@ -362,6 +381,7 @@ export default function CarComparison() {
   const [pseudoEindheffing, setPseudoEindheffing] = useState(true);
   const [registerBefore2027, setRegisterBefore2027] = useState(false);
   const [box2Rate, setBox2Rate] = useState(0.245);
+  const [cashRetentionMode, setCashRetentionMode] = useState("extract");
 
   // Default ANCHOR = the user's baseline plan: Used Petrol Private @ €8k cash, 5y.
   const [activeFuel, setActiveFuel] = useState("petrol");
@@ -381,8 +401,8 @@ export default function CarComparison() {
 
   const params = useMemo(() => ({
     grossSalary, use30Ruling, financeMode,
-    pseudoEindheffing: effectivePseudo, box2Rate,
-  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate]);
+    pseudoEindheffing: effectivePseudo, box2Rate, cashRetentionMode,
+  }), [grossSalary, use30Ruling, financeMode, effectivePseudo, box2Rate, cashRetentionMode]);
 
   const taxableAfter = taxableAfterRuling(grossSalary, use30Ruling);
 
@@ -675,12 +695,24 @@ export default function CarComparison() {
             <div style={{ fontSize: 15, color: "#9b59b6", fontWeight: 700 }}>{annualKm.toLocaleString()} km/yr</div>
           </div>
           <div>
-            <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Box 2 (DGA dividend)</label>
-            <Segmented value={box2Rate} onChange={setBox2Rate} color="#27ae60" options={[
-              { value: 0.245, label: "24.5%" },
-              { value: 0.31,  label: "31%" },
+            <label style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 4 }}>BV cash plan</label>
+            <Segmented value={cashRetentionMode} onChange={setCashRetentionMode} color="#27ae60" options={[
+              { value: "extract", label: "Extract via dividend" },
+              { value: "retain",  label: "Retain in BV" },
             ]}/>
-            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>24.5% up to €68,843/yr; 31% above</div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+              {cashRetentionMode === "extract"
+                ? `Box 2 ${Math.round(box2Rate*100)}% applied to BV cash & residual`
+                : "No box 2 modeled — assumes you reinvest BV cash"}
+            </div>
+            {cashRetentionMode === "extract" && (
+              <div style={{ marginTop: 6 }}>
+                <Segmented value={box2Rate} onChange={setBox2Rate} color="#27ae60" small options={[
+                  { value: 0.245, label: "24.5%" },
+                  { value: 0.31,  label: "31%" },
+                ]}/>
+              </div>
+            )}
           </div>
           <Toggle value={use30Ruling} onChange={setUse30Ruling} color="#3498db"
             label="30% Ruling active"
@@ -862,6 +894,61 @@ export default function CarComparison() {
             );
           })}
         </div>
+
+        {/* Corporate-tax offset (VPB savings) panel — surfaces what BV ownership actually saves */}
+        {stratPureBV.totalGrossBVCost > 0 && (
+          <div style={{
+            background: "#0d1018",
+            border: `1px solid ${cashRetentionMode === "retain" ? "#27ae60" : "#16a08555"}`,
+            borderRadius: 8, padding: 14, marginBottom: 16,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ fontSize: 12, color: "#1abc9c", letterSpacing: 2, textTransform: "uppercase" }}>
+                💰 BV path: corporate-tax offset over {holdYears}y
+              </div>
+              <div style={{ fontSize: 11, color: "#888" }}>
+                Active scenario: {STATES[activeState].label} {FUELS[activeFuel].label} @ {fmt(customPrice)}
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 10 }}>
+              <div style={{ background: "#0a0a14", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>Gross BV expenses</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#e0e0e0", marginTop: 2 }}>{fmt(stratPureBV.totalGrossBVCost)}</div>
+                <div style={{ fontSize: 10, color: "#666" }}>depr. + fuel + maint. + MRB + cap. + pseudo</div>
+              </div>
+              <div style={{ background: "#0a1a14", borderRadius: 6, padding: 10, border: "1px solid #16a08555" }}>
+                <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>VPB saving (19%)</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#27ae60", marginTop: 2 }}>−{fmt(stratPureBV.totalVPBSaving)}</div>
+                <div style={{ fontSize: 10, color: "#666" }}>that's your corporate-tax offset</div>
+              </div>
+              <div style={{ background: "#0a0a14", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>+ Bijtelling tax (you)</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#e74c3c", marginTop: 2 }}>+{fmt(stratPureBV.totalBijtellingTax)}</div>
+                <div style={{ fontSize: 10, color: "#666" }}>{stratPureBV.segments[0].marginalRate * 100 | 0}% marginal × cat.</div>
+              </div>
+              <div style={{ background: "#0a0a14", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>{cashRetentionMode === "retain" ? "Box 2 deferred" : "+ Box 2 drag"}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: cashRetentionMode === "retain" ? "#27ae60" : "#e67e22", marginTop: 2 }}>
+                  {cashRetentionMode === "retain" ? "—" : "+" + fmt(stratPureBV.totalBox2Drag)}
+                </div>
+                <div style={{ fontSize: 10, color: "#666" }}>{cashRetentionMode === "retain" ? "if cash stays in BV" : `${Math.round(box2Rate*100)}% on extracted cash`}</div>
+              </div>
+            </div>
+            <div style={{
+              padding: "10px 12px", background: "#0a0a14", borderRadius: 6,
+              fontSize: 12, color: "#aaa", lineHeight: 1.6,
+            }}>
+              Yes — BV expenses offset corporate income tax (VPB) at {Math.round(VPB_RATE * 100)}%, saving you{" "}
+              <strong style={{ color: "#27ae60" }}>{fmt(stratPureBV.totalVPBSaving)}</strong> over {holdYears} years on this car.
+              But that benefit is only ~half the picture. You also incur:
+              <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                <li><strong style={{ color: "#e74c3c" }}>Bijtelling income tax</strong> on you personally for the private-use benefit ({stratPureBV.segments[0].bijtellingRate}% × catalogue × your {stratPureBV.segments[0].marginalRate * 100 | 0}% marginal).</li>
+                {cashRetentionMode === "extract" && <li><strong style={{ color: "#e67e22" }}>Box 2 dividend tax</strong> when you eventually extract the BV cash to your personal pocket — modeled at {Math.round(box2Rate*100)}%.</li>}
+                {cashRetentionMode === "retain" && <li><strong style={{ color: "#27ae60" }}>Cash-retention mode is on</strong> — box 2 isn't applied. The model assumes BV cash stays in the BV (reinvested, used for future salary, etc.). When you do eventually pull it out, box 2 will apply then.</li>}
+              </ul>
+            </div>
+          </div>
+        )}
 
         {/* Detailed breakdown of the active scenario, all 3 strategies */}
         <div style={{
