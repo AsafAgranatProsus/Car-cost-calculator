@@ -6,46 +6,66 @@ const LOAN_RATE = 0.06;
 
 const FUEL_TYPES = {
   petrol: {
-    label: "Petrol / Self-charging hybrid",
+    label: "Petrol",
+    short: "Petrol",
     isEV: false,
-    annualFuelCost: 1800,
-    annualMaintenance: 1200,
-    resaleFraction: 0.52,
+    annualFuelCost: 2000,
+    annualMaintenance: 1100,
+    resaleFraction: 0.50,
     color: "#c0392b", accent: "#e74c3c",
+    note: "Pure ICE — cheapest to buy, most exposed to 2027 pseudo-eindheffing.",
+  },
+  hybrid: {
+    label: "Self-charging Hybrid",
+    short: "Hybrid",
+    isEV: false,
+    annualFuelCost: 1500,
+    annualMaintenance: 1100,
+    resaleFraction: 0.54,
+    color: "#d35400", accent: "#e67e22",
+    note: "No plug. Standard MRB rate, lower fuel than pure petrol.",
   },
   phev: {
     label: "Plug-in Hybrid (PHEV)",
+    short: "PHEV",
     isEV: false, isPHEV: true,
-    annualFuelCost: 1500,
+    annualFuelCost: 1300,
     annualMaintenance: 1300,
-    resaleFraction: 0.50,
+    resaleFraction: 0.48,
     color: "#8e44ad", accent: "#9b59b6",
+    note: "Heavier weight class → higher MRB from 2026, no discount. Same 22% bijtelling as petrol.",
   },
   evUsed: {
     label: "Used EV (2022–23)",
+    short: "Used EV",
     isEV: true, evRegYear: 2022,
     annualFuelCost: 600,
     annualMaintenance: 700,
     resaleFraction: 0.60,
     color: "#16a085", accent: "#1abc9c",
+    note: "17% bijtelling locked in (registered ≤2025). MRB 30% discount through 2026.",
   },
   evNew: {
     label: "New EV (2025–26)",
+    short: "New EV",
     isEV: true, evRegYear: 2026,
     annualFuelCost: 650,
     annualMaintenance: 750,
     resaleFraction: 0.68,
     color: "#2980b9", accent: "#3498db",
+    note: "Blended 18%/22% bijtelling at €30k cap. Best resale long-term, exempt from 2027 pseudo-eindheffing.",
   },
 };
 
-const BASE_SCENARIOS = [
-  { id: "petrol-bv",     label: "Petrol/Hybrid",      sublabel: "e.g. Toyota RAV4 Hybrid",  type: "bv",      fuelKey: "petrol", carPrice: 28000, tag: "Standard petrol" },
-  { id: "petrol-priv",   label: "Petrol/Hybrid",      sublabel: "Private purchase",          type: "private", fuelKey: "petrol", carPrice: 28000, tag: "Simplest" },
-  { id: "ev-used-bv",    label: "Used EV (2022–23)",  sublabel: "e.g. Tesla Model Y / EV6", type: "bv",      fuelKey: "evUsed", carPrice: 34000, tag: "Sweet spot \u2605" },
-  { id: "ev-used-priv",  label: "Used EV (2022–23)",  sublabel: "Private purchase",          type: "private", fuelKey: "evUsed", carPrice: 34000, tag: "Cash & forget" },
-  { id: "ev-new-bv",     label: "New EV (2025–26)",   sublabel: "e.g. Tesla Model Y, EV9",  type: "bv",      fuelKey: "evNew",  carPrice: 45000, tag: "Best resale" },
-];
+const FUEL_ORDER = ["petrol", "hybrid", "phev", "evUsed", "evNew"];
+
+const PREBAKED_PRICES = {
+  petrol: 22000,
+  hybrid: 28000,
+  phev: 38000,
+  evUsed: 34000,
+  evNew: 45000,
+};
 
 function buildScenario(s) {
   const fuel = FUEL_TYPES[s.fuelKey];
@@ -221,43 +241,53 @@ export default function CarComparison() {
   const [holdYears, setHoldYears] = useState(4);
   const [financeMode, setFinanceMode] = useState("cash");
   const [pseudoEindheffing, setPseudoEindheffing] = useState(false);
-  const [activeScenario, setActiveScenario] = useState("ev-used-bv");
-  const [explorerFuel, setExplorerFuel] = useState("petrol");
-  const [explorerPrice, setExplorerPrice] = useState(14000);
+  const [explorerPrice, setExplorerPrice] = useState(28000);
+  const [activeKey, setActiveKey] = useState("evUsed:bv");
 
   const params = { grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing };
 
-  const results = useMemo(() =>
-    BASE_SCENARIOS.map(s => {
-      const built = buildScenario(s);
-      return { ...built, calc: calcMonthlyCosts(built, params) };
+  // Matrix at a single explorer price: every fuel × {bv, private}
+  const matrix = useMemo(() => {
+    const rows = FUEL_ORDER.map(fuelKey => {
+      const fuel = FUEL_TYPES[fuelKey];
+      const bvBuilt = buildScenario({ id: `${fuelKey}:bv`, type: "bv", fuelKey, carPrice: explorerPrice });
+      const pvBuilt = buildScenario({ id: `${fuelKey}:private`, type: "private", fuelKey, carPrice: explorerPrice });
+      const bv = { ...bvBuilt, calc: calcMonthlyCosts(bvBuilt, params), pathLabel: "BV" };
+      const pv = { ...pvBuilt, calc: calcMonthlyCosts(pvBuilt, params), pathLabel: "Private" };
+      const cross = findCrossover(fuelKey, params);
+      return { fuelKey, fuel, bv, pv, cross,
+        winnerPath: bv.calc.totalMonthlyPersonal <= pv.calc.totalMonthlyPersonal ? "bv" : "private",
+        diff: pv.calc.totalMonthlyPersonal - bv.calc.totalMonthlyPersonal };
+    });
+    return rows;
+  }, [explorerPrice, grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing]);
+
+  // Cheapest combo overall at this price
+  const allRows = useMemo(() => matrix.flatMap(r => [r.bv, r.pv]), [matrix]);
+  const cheapest = useMemo(() =>
+    allRows.reduce((best, r) => r.calc.totalMonthlyPersonal < best.calc.totalMonthlyPersonal ? r : best, allRows[0]),
+    [allRows]
+  );
+
+  // Prebaked scenarios at each fuel's "typical" price
+  const prebaked = useMemo(() =>
+    FUEL_ORDER.flatMap(fuelKey => {
+      const price = PREBAKED_PRICES[fuelKey];
+      return ["bv", "private"].map(t => {
+        const built = buildScenario({ id: `pb:${fuelKey}:${t}`, type: t, fuelKey, carPrice: price });
+        return { ...built, calc: calcMonthlyCosts(built, params), pathLabel: t === "bv" ? "BV" : "Private" };
+      });
     }),
     [grossSalary, use30Ruling, financeMode, holdYears, pseudoEindheffing]
   );
 
-  const explorerBV = useMemo(() => {
-    const built = buildScenario({ id: "explorer-bv", type: "bv", fuelKey: explorerFuel, carPrice: explorerPrice });
-    return { ...built, calc: calcMonthlyCosts(built, params) };
-  }, [explorerFuel, explorerPrice, params]);
-
-  const explorerPriv = useMemo(() => {
-    const built = buildScenario({ id: "explorer-priv", type: "private", fuelKey: explorerFuel, carPrice: explorerPrice });
-    return { ...built, calc: calcMonthlyCosts(built, params) };
-  }, [explorerFuel, explorerPrice, params]);
-
-  const crossover = useMemo(() => findCrossover(explorerFuel, params), [explorerFuel, params]);
-
-  const explorerDiff = explorerPriv.calc.totalMonthlyPersonal - explorerBV.calc.totalMonthlyPersonal;
-  const bvIsCheaper = explorerDiff > 0;
-
-  const maxMonthly = Math.max(...results.map(r => r.calc.totalMonthlyPersonal));
-  const maxBarValue = Math.max(1, ...results.flatMap(r => [
+  const maxMonthly = Math.max(...allRows.map(r => r.calc.totalMonthlyPersonal));
+  const maxBarValue = Math.max(1, ...allRows.flatMap(r => [
     r.calc.monthlyBijtellingTax, r.calc.monthlyRunning,
     r.calc.monthlyMRB, r.calc.monthlyDepreciation, r.calc.monthlyPseudo, r.calc.monthlyCapitalCost
   ]));
 
-  const active = results.find(r => r.id === activeScenario)
-    || (activeScenario === "explorer-bv" ? explorerBV : activeScenario === "explorer-priv" ? explorerPriv : results[0]);
+  const active = allRows.find(r => r.id === activeKey) || prebaked.find(r => r.id === activeKey) || cheapest;
 
   return (
     <>
@@ -327,98 +357,140 @@ export default function CarComparison() {
         </div>
       </div>
 
-      {/* Path Crossover Explorer */}
+      {/* Powertrain × Path Matrix */}
       <div style={{
         background: "#0c1118",
-        border: `2px solid ${bvIsCheaper ? "#16a085" : "#e67e22"}`,
+        border: `2px solid ${cheapest.color}`,
         borderRadius: 10, padding: 16, marginBottom: 16,
         transition: "border-color 0.4s",
       }}>
-        <div style={{ fontSize: 12, color: "#1abc9c", letterSpacing: 3, textTransform: "uppercase", marginBottom: 12 }}>
-          ★ Path Crossover Explorer · BV vs Private
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <Segmented value={explorerFuel} onChange={setExplorerFuel} color="#1abc9c" options={Object.entries(FUEL_TYPES).map(([k, v]) => ({ value: k, label: v.label.split(" ")[0] }))} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 12, color: "#1abc9c", letterSpacing: 3, textTransform: "uppercase" }}>
+            ★ Powertrain × Path Matrix
+          </div>
+          <div style={{ fontSize: 11, color: "#888" }}>
+            All 5 powertrains × BV/Private at your chosen price
+          </div>
         </div>
 
         <label style={{ fontSize: 12, color: "#aaa", letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-          Car price
+          Car price (purchase)
         </label>
         <input type="range" min={4000} max={80000} step={500} value={explorerPrice}
           onChange={e => setExplorerPrice(+e.target.value)}
           style={{ width: "100%", accentColor: "#1abc9c" }} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12 }}>
-          <div style={{ fontSize: 22, color: "#1abc9c", fontWeight: 900 }}>€{explorerPrice.toLocaleString()}</div>
-          <div style={{ fontSize: 12, color: "#999" }}>{FUEL_TYPES[explorerFuel].label}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 14 }}>
+          <div style={{ fontSize: 24, color: "#1abc9c", fontWeight: 900 }}>€{explorerPrice.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: "#999" }}>same price applied to every powertrain</div>
         </div>
 
-        {/* Verdict */}
+        {/* Cheapest verdict */}
         <div style={{
-          background: bvIsCheaper ? "#001a14" : "#1a0d00",
-          border: `1px solid ${bvIsCheaper ? "#16a085" : "#7f3900"}`,
+          background: `${cheapest.color}15`,
+          border: `1px solid ${cheapest.color}`,
           borderRadius: 8, padding: "12px 14px",
           display: "flex", justifyContent: "space-between", alignItems: "center",
-          transition: "all 0.4s", marginBottom: 10,
+          transition: "all 0.4s", marginBottom: 14,
         }}>
           <div>
-            <div style={{ fontSize: 14, color: bvIsCheaper ? "#1abc9c" : "#e67e22", fontWeight: 700, marginBottom: 3 }}>
-              {bvIsCheaper ? "✓ Buy through the BV" : "✓ Buy privately"}
+            <div style={{ fontSize: 11, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>Cheapest combo at €{explorerPrice.toLocaleString()}</div>
+            <div style={{ fontSize: 16, color: cheapest.color, fontWeight: 800 }}>
+              {cheapest.label} · {cheapest.pathLabel}
             </div>
-            <div style={{ fontSize: 12, color: "#999" }}>
-              {crossover.price !== null
-                ? <>Crossover at <strong style={{ color: "#f1c40f" }}>€{crossover.price.toLocaleString()}</strong> — {explorerPrice < crossover.price ? "below it private wins" : "above it BV wins"}</>
-                : <>Under these settings, <strong style={{ color: bvIsCheaper ? "#1abc9c" : "#e67e22" }}>{crossover.alwaysCheaper === "bv" ? "BV is always cheaper" : "private is always cheaper"}</strong> at any price in the explored range.</>
-              }
-            </div>
+            <div style={{ fontSize: 12, color: "#999" }}>{cheapest.note}</div>
           </div>
           <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: bvIsCheaper ? "#1abc9c" : "#e67e22", lineHeight: 1 }}>
-              {explorerDiff > 0 ? "+" : ""}€{Math.abs(explorerDiff)}/mo
+            <div style={{ fontSize: 30, fontWeight: 900, color: cheapest.color, lineHeight: 1 }}>
+              €{cheapest.calc.totalMonthlyPersonal}
             </div>
-            <div style={{ fontSize: 11, color: "#888" }}>{bvIsCheaper ? "private costs more" : "BV costs more"}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>/mo net to you</div>
           </div>
         </div>
 
-        {/* Side by side */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div style={{ background: "#001a14", borderRadius: 6, padding: 10, cursor: "pointer", border: bvIsCheaper ? "1px solid #16a085" : "1px solid transparent" }}
-            onClick={() => setActiveScenario("explorer-bv")}>
-            <div style={{ fontSize: 11, color: "#1abc9c", marginBottom: 2 }}>BV path</div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: "#1abc9c" }}>€{explorerBV.calc.totalMonthlyPersonal}</div>
-            <div style={{ fontSize: 11, color: "#999" }}>/mo · bijtelling {explorerBV.calc.bijtellingRate}%</div>
-          </div>
-          <div style={{ background: "#1a0d00", borderRadius: 6, padding: 10, cursor: "pointer", border: !bvIsCheaper ? "1px solid #e67e22" : "1px solid transparent" }}
-            onClick={() => setActiveScenario("explorer-priv")}>
-            <div style={{ fontSize: 11, color: "#e67e22", marginBottom: 2 }}>Private path</div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: "#e67e22" }}>€{explorerPriv.calc.totalMonthlyPersonal}</div>
-            <div style={{ fontSize: 11, color: "#999" }}>/mo · {financeMode === "loan" ? "loan 6%" : "cash 4% opp."}</div>
-          </div>
+        {/* Matrix rows */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {matrix.map(row => {
+            const isCheapestRow = cheapest.fuelKey === row.fuelKey;
+            return (
+              <div key={row.fuelKey} style={{
+                background: "#0a0d18",
+                border: `1px solid ${isCheapestRow ? row.fuel.color : "#1e1e3a"}`,
+                borderRadius: 8, padding: 10,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                  <div>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: row.fuel.color }}>{row.fuel.label}</span>
+                    {isCheapestRow && <span style={{
+                      marginLeft: 8, background: row.fuel.color, color: "#fff",
+                      fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3,
+                      letterSpacing: 1, textTransform: "uppercase",
+                    }}>cheapest</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    {row.cross.price !== null
+                      ? <>BV↔Private crossover @ <strong style={{ color: "#f1c40f" }}>€{row.cross.price.toLocaleString()}</strong></>
+                      : <>Always {row.cross.alwaysCheaper === "bv" ? <strong style={{ color: "#1abc9c" }}>BV-cheaper</strong> : <strong style={{ color: "#e67e22" }}>Private-cheaper</strong>} at any price</>}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[row.bv, row.pv].map(opt => {
+                    const isWinner = (row.winnerPath === "bv" && opt === row.bv) || (row.winnerPath === "private" && opt === row.pv);
+                    const isActive = activeKey === opt.id;
+                    const accent = opt.type === "bv" ? "#1abc9c" : "#e67e22";
+                    return (
+                      <div key={opt.id} onClick={() => setActiveKey(opt.id)} style={{
+                        background: isActive ? `${accent}20` : (isWinner ? `${accent}10` : "#0d0d1a"),
+                        border: `1px solid ${isActive ? accent : (isWinner ? `${accent}55` : "transparent")}`,
+                        borderRadius: 6, padding: "8px 10px", cursor: "pointer",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        transition: "all 0.15s",
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: accent, letterSpacing: 1, textTransform: "uppercase", fontWeight: 700 }}>
+                            {opt.pathLabel} {isWinner && "✓"}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>
+                            {opt.type === "bv"
+                              ? `bijtelling ${opt.calc.bijtellingRate}%`
+                              : (financeMode === "loan" ? "loan 6%" : "cash 4% opp.")}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: accent, lineHeight: 1 }}>
+                          €{opt.calc.totalMonthlyPersonal}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* 30% ruling insight note */}
         <div style={{
-          marginTop: 10, padding: "10px 12px", borderRadius: 6,
+          marginTop: 12, padding: "10px 12px", borderRadius: 6,
           background: "#0a0a1a", border: "1px solid #3498db30",
           fontSize: 12, color: "#7fb3d3", lineHeight: 1.6,
         }}>
           <span style={{ color: "#3498db", fontWeight: 700 }}>💡 30% ruling effect: </span>
           {use30Ruling
-            ? "Your ruling shrinks the marginal rate that hits BV bijtelling income, which makes the BV path more attractive — especially for high-catalogue EVs. Toggle the ruling off to see how the crossover shifts when it expires."
-            : "Without your ruling, BV bijtelling is taxed at the full ~49.5%, pushing the crossover toward higher prices (private wins on more cars). This is the post-ruling reality."}
+            ? "Your ruling shrinks the marginal rate that hits BV bijtelling income, which makes the BV path more attractive — especially for high-catalogue EVs. Toggle the ruling off to see how the crossovers shift when it expires."
+            : "Without your ruling, BV bijtelling is taxed at the full ~49.5%, pushing every crossover toward higher prices (private wins on more cars). This is the post-ruling reality."}
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Prebaked at typical prices */}
       <div style={{ fontSize: 12, color: "#999", letterSpacing: 2, textTransform: "uppercase", marginBottom: 8 }}>
-        Prebaked scenarios at typical prices
+        Or at each powertrain's typical price
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-        {results.map(r => {
-          const isActive = r.id === activeScenario;
-          const isLowest = r.calc.totalMonthlyPersonal === Math.min(...results.map(x => x.calc.totalMonthlyPersonal));
+        {prebaked.map(r => {
+          const isActive = r.id === activeKey;
+          const isLowest = r.calc.totalMonthlyPersonal === Math.min(...prebaked.map(x => x.calc.totalMonthlyPersonal));
           return (
-            <div key={r.id} onClick={() => setActiveScenario(r.id)} style={{
+            <div key={r.id} onClick={() => setActiveKey(r.id)} style={{
               background: isActive ? `${r.color}15` : "#111122",
               border: `1px solid ${isActive ? r.color : "#1e1e3a"}`,
               borderRadius: 8, padding: "12px", cursor: "pointer",
@@ -433,17 +505,16 @@ export default function CarComparison() {
                 }}>CHEAPEST</div>
               )}
               <div style={{ fontSize: 11, color: r.accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 2 }}>
-                {r.tag} · {r.type === "bv" ? "BV" : "Private"}
+                {r.short || r.label} · {r.pathLabel}
               </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", marginBottom: 1 }}>{r.label}</div>
-              <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>{r.sublabel} · €{r.carPrice.toLocaleString()}</div>
+              <div style={{ fontSize: 13, color: "#999", marginBottom: 8 }}>€{r.carPrice.toLocaleString()} purchase</div>
               <div style={{ fontSize: 28, fontWeight: 900, color: r.color, lineHeight: 1 }}>
                 €{r.calc.totalMonthlyPersonal}
               </div>
               <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>/month to you</div>
               <div style={{ marginTop: 8, height: 3, background: "#1a1a2e", borderRadius: 2 }}>
                 <div style={{
-                  width: `${(r.calc.totalMonthlyPersonal / maxMonthly) * 100}%`,
+                  width: `${(r.calc.totalMonthlyPersonal / Math.max(...prebaked.map(x => x.calc.totalMonthlyPersonal))) * 100}%`,
                   height: "100%", background: r.color, borderRadius: 2, transition: "width 0.5s"
                 }} />
               </div>
@@ -459,8 +530,9 @@ export default function CarComparison() {
           borderRadius: 8, padding: 16, marginBottom: 16,
         }}>
           <div style={{ fontSize: 13, color: active.accent, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
-            ▶ {active.label} · {active.type === "bv" ? "BV" : "Private"} · €{active.carPrice.toLocaleString()} · Breakdown
+            ▶ {active.label} · {active.pathLabel || (active.type === "bv" ? "BV" : "Private")} · €{active.carPrice.toLocaleString()} · Breakdown
           </div>
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 10, lineHeight: 1.5 }}>{active.note}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
             {[
               { label: "Car Price", value: `€${active.carPrice.toLocaleString()}`, sub: "purchase" },
@@ -506,14 +578,14 @@ export default function CarComparison() {
           Resale Outlook · {holdYears} year hold
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {results.map(r => (
-            <div key={r.id} style={{ fontSize: 13 }}>
-              <span style={{ color: r.accent }}>{r.label}</span>
-              <span style={{ color: "#999" }}> ({r.type === "bv" ? "BV" : "Priv"}) → </span>
+          {matrix.map(row => (
+            <div key={row.fuelKey} style={{ fontSize: 13 }}>
+              <span style={{ color: row.fuel.accent }}>{row.fuel.short}</span>
+              <span style={{ color: "#999" }}> @ €{explorerPrice.toLocaleString()} → </span>
               <span style={{ color: "#e0e0e0", fontWeight: 700 }}>
-                €{r.calc.resaleValue.toLocaleString()}
+                €{row.bv.calc.resaleValue.toLocaleString()}
               </span>
-              <span style={{ color: "#888", fontSize: 11 }}> est.</span>
+              <span style={{ color: "#888", fontSize: 11 }}> ({Math.round(row.fuel.resaleFraction * 100)}% × time)</span>
             </div>
           ))}
         </div>
