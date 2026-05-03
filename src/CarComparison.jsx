@@ -547,10 +547,10 @@ export default function CarComparison() {
   const betterThanAnchor = alternatives.filter(a => !a.isAnchor && a.netWealthCost < anchorNet);
   const top3Better = betterThanAnchor.slice(0, 3);
 
-  const setActiveCell = (fuelKey, stateKey) => {
+  const setActiveCell = (fuelKey, stateKey, priceOverride) => {
     setActiveFuel(fuelKey);
     setActiveState(stateKey);
-    setCustomPrice(PREBAKED_PRICES[fuelKey][stateKey]);
+    setCustomPrice(priceOverride ?? PREBAKED_PRICES[fuelKey][stateKey]);
     setCustomCatalogue(null);
   };
 
@@ -1141,6 +1141,79 @@ export default function CarComparison() {
             From <strong>1 Jan 2027</strong>, the BV (employer) pays <strong style={{ color: "#e67e22" }}>+12% of catalogue value/yr</strong> for any
             petrol/hybrid/PHEV car made available to an employee — and <strong>commute counts as private use</strong>.
             EVs and hydrogen are exempt. Register the car to the BV before <strong>1 Jan 2027</strong> → transition rule defers this until <strong>17 Sep 2030</strong>.
+          </div>
+        </div>
+
+        {/* Petrol Price Ladder */}
+        <div style={{
+          background: "#0a0d18", border: "1px solid #1e1e3a", borderRadius: 8,
+          padding: 14, marginBottom: 14, overflowX: "auto",
+        }}>
+          <div style={{ fontSize: 12, color: "#e74c3c", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>
+            Petrol price ladder · Private cash, your current settings
+          </div>
+          <div style={{ fontSize: 11, color: "#888", marginBottom: 10, lineHeight: 1.5 }}>
+            Same usage profile, just stretching upfront budget. Watch the cliff at ~€18k where you cross from "old used" (5+ yrs) to "young used" (2–3 yrs) and the residual curve flips. Click any row to load it as the active scenario.
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 560 }}>
+            <thead>
+              <tr style={{ color: "#999", textAlign: "left" }}>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222" }}>Budget</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222" }}>Realistic age</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Total 5y</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Residual</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Net wealth lost</th>
+                <th style={{ padding: "6px 8px", borderBottom: "1px solid #222", textAlign: "right" }}>Δ vs cheapest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const ladder = [
+                  { price: 8000,  state: "used",   age: "~2014–2016 used" },
+                  { price: 10000, state: "used",   age: "~2015–2017 used" },
+                  { price: 12000, state: "used",   age: "~2016–2018 used" },
+                  { price: 14000, state: "used",   age: "~2017–2019 used" },
+                  { price: 16000, state: "used",   age: "~2018–2020 used" },
+                  { price: 18000, state: "young",  age: "~2020–2022 young ★" },
+                  { price: 22000, state: "young",  age: "~2021–2023 young" },
+                  { price: 26000, state: "young",  age: "~2022–2024 young" },
+                ];
+                const rows = ladder.map(r => {
+                  const sc = buildScenario("petrol", r.state, r.price, { annualKm });
+                  const s = strategyPurePrivate(sc, params, holdYears);
+                  return { ...r, total: s.totalCost, residual: s.residualPersonal,
+                           net: s.totalCost - s.residualPersonal };
+                });
+                const cheapest = Math.min(...rows.map(r => r.net));
+                return rows.map(r => {
+                  const isActive = activeFuel === "petrol" && activeState === r.state && customPrice === r.price;
+                  const isCheapest = r.net === cheapest;
+                  const delta = r.net - cheapest;
+                  return (
+                    <tr key={r.price} onClick={() => setActiveCell("petrol", r.state, r.price)}
+                      style={{
+                        borderBottom: "1px solid #1a1a2e",
+                        background: isActive ? "#c0392b15" : isCheapest ? "#27ae6010" : "transparent",
+                        cursor: "pointer", transition: "background 0.15s",
+                      }}>
+                      <td style={{ padding: "6px 8px", color: "#e0e0e0", fontWeight: 700 }}>€{r.price.toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", color: "#888" }}>{r.age}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: "#aaa" }}>{fmt(r.total)}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: "#aaa" }}>{fmt(r.residual)}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: isCheapest ? "#27ae60" : "#e0e0e0", fontWeight: 700 }}>{fmt(r.net)}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: delta === 0 ? "#27ae60" : "#888" }}>
+                        {delta === 0 ? "✓ best" : `+${fmt(delta)}`}
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
+            ★ The €18k row is where the resale curve flips — a 4-year-old car holds value disproportionately better than an 8-year-old one. Within each age tier, every extra €2k costs ~€800 in net wealth; crossing the tier boundary saves more than it costs.
+            <br/><br/>
+            <strong style={{ color: "#aaa" }}>Caveat:</strong> the cliff is partly a modeling artifact — real used-car prices are continuous, not bucketed. The model uses different `resaleFraction` per age tier (0.45 used / 0.55 young / 0.65 new), which overstates the discontinuity. Direction is correct; magnitude is approximate.
           </div>
         </div>
 
