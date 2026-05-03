@@ -2,6 +2,14 @@
 
 Dutch monthly car-cost calculator (BV vs. private, EV vs. petrol/hybrid). Built with React + Vite.
 
+**Live site**: https://asafagranatprosus.github.io/Car-cost-calculator/
+
+## Documentation
+
+- 📘 **[Car Decision Reference](./docs/CAR_DECISION_REFERENCE.md)** — full standalone analysis, math, sources, conclusions. Read this first.
+- 🛠 **[Skill: dga-car-tax-modeling](./.cursor/skills/dga-car-tax-modeling/SKILL.md)** — modeling architecture, anti-patterns, and audit invariants for anyone editing the model.
+- ✅ **[Audit script](./.cursor/skills/dga-car-tax-modeling/audit.mjs)** — 83 economic-identity checks. Run before every deploy: `node .cursor/skills/dga-car-tax-modeling/audit.mjs`.
+
 ## Local development
 
 ```bash
