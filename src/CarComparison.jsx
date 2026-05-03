@@ -404,10 +404,13 @@ const fmt = n => `€${Math.round(n).toLocaleString()}`;
 // Main component
 // ============================================================================
 export default function CarComparison() {
-  const [grossSalary, setGrossSalary] = useState(80000);
+  // Defaults are calibrated to the primary user (DGA, 30% ruling, Amsterdam-based,
+  // ~€78k salary = €6,500/mo gross, holiday-mostly use, family of 4 with camping).
+  // All sliders are still user-adjustable — these are just the starting point.
+  const [grossSalary, setGrossSalary] = useState(78000);
   const [use30Ruling, setUse30Ruling] = useState(true);
   const [holdYears, setHoldYears] = useState(5);
-  const [annualKm, setAnnualKm] = useState(18000);
+  const [annualKm, setAnnualKm] = useState(8000);
   const [financeMode, setFinanceMode] = useState("cash");
   const [pseudoEindheffing, setPseudoEindheffing] = useState(true);
   const [registerBefore2027, setRegisterBefore2027] = useState(false);
@@ -415,7 +418,7 @@ export default function CarComparison() {
   const [cashRetentionMode, setCashRetentionMode] = useState("extract");
   const [oilStress, setOilStress] = useState(1.0);
   const [bvProfitable, setBvProfitable] = useState(true);
-  const [highwayPct, setHighwayPct] = useState(0.5);
+  const [highwayPct, setHighwayPct] = useState(0.75);
 
   // Default ANCHOR = the user's baseline plan: Used Petrol Private @ €8k cash, 5y.
   const [activeFuel, setActiveFuel] = useState("petrol");
