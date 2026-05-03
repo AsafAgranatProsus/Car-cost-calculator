@@ -124,15 +124,28 @@ function buildScenario(fuelKey, stateKey, carPrice, opts = {}) {
   };
 }
 
+// EV bijtelling: locked-in for 60 months (5 years) from first registration,
+// then transitions to whatever the standard rate is in that year.
+// As of 2026, post-lock cars pay 22% (the standard rate).
+// We assume "current year" = 2026 (the calculator's reference year).
+const CURRENT_YEAR = 2026;
+
 function getBijtellingRate(scenario, catalogueValue) {
   if (!scenario.isEV) return 0.22;
-  const yr = scenario.evRegYear || 2026;
+  const regYear = scenario.evRegYear || 2026;
+  const yearsSinceReg = CURRENT_YEAR - regYear;
+  // If 60-month lock has expired, fall back to standard 22%.
+  if (yearsSinceReg >= 5) return 0.22;
   const split = (cap, rate) =>
     ((Math.min(catalogueValue, cap) * rate) + (Math.max(0, catalogueValue - cap) * 0.22)) / catalogueValue;
-  if (yr <= 2022) return split(35000, 0.16);
-  if (yr <= 2024) return split(30000, 0.16);
-  if (yr === 2025) return split(30000, 0.17);
-  if (yr === 2026) return split(30000, 0.18);
+  // Historical EV bijtelling caps & rates (year of first registration):
+  if (regYear <= 2019) return 0.22; // pre-2020 = old regime, treat as standard now
+  if (regYear === 2020) return split(45000, 0.08);
+  if (regYear === 2021) return split(40000, 0.12);
+  if (regYear === 2022) return split(35000, 0.16);
+  if (regYear === 2023 || regYear === 2024) return split(30000, 0.16);
+  if (regYear === 2025) return split(30000, 0.17);
+  if (regYear === 2026) return split(30000, 0.18);
   return 0.22;
 }
 
@@ -165,18 +178,14 @@ function calcSegment(scenario, type, params, startPrice, years) {
   const months = years * 12;
   // Oil-stress multiplier applies to ICE fuels; EV charging cost is much less sensitive.
   const fuelStressMult = scenario.isEV ? 1 + (oilStress - 1) * 0.15 : oilStress;
-  // Usage-mix multiplier: linearly blends each fuel's city vs highway efficiency.
-  // highwayPct=0 → pure city, =1 → pure highway, =0.5 → mixed (multiplier = 1).
+  // Usage-mix multiplier: linearly interpolates between each fuel's city and highway efficiency.
+  // Rescaled so that highwayPct=0.5 yields exactly 1.0 (anchor to fuelCostPer10k defaults).
   const cityMult = scenario.fuel.cityMult ?? 1;
   const highwayMult = scenario.fuel.highwayMult ?? 1;
-  const usageMult = cityMult * (1 - highwayPct) * 2 * 0.5 + highwayMult * highwayPct * 2 * 0.5;
-  // Simpler equivalent: linear interpolation between city and highway multipliers.
-  // We rescale so that highwayPct=0.5 yields exactly 1.0 (anchor to mixed-use defaults).
   const rawMix = cityMult * (1 - highwayPct) + highwayMult * highwayPct;
   const anchorAtHalf = (cityMult + highwayMult) / 2;
   const mixMult = anchorAtHalf > 0 ? rawMix / anchorAtHalf : 1;
   const annualFuel = (scenario.fuel.fuelCostPer10k * fuelStressMult * mixMult * scenario.annualKm) / 10000;
-  void usageMult;
   const annualRunning = annualFuel + scenario.annualMaintenance;
   const annualMRB = getMRBMonthly(scenario) * 12;
   const endResale = resaleAtAge(startPrice, scenario.resaleFraction, years);
@@ -517,16 +526,24 @@ export default function CarComparison() {
     return strategyOf(anchorScenario, anchor.strategy);
   }, [anchorScenario, anchor.strategy, params, holdYears]);
 
-  // Net wealth change = total paid out − residual personally retained.
-  // This is the actual money you lose over the period.
-  // True net wealth lost over the period.
-  // For Pure Private and Extension: depreciation already nets the residual inside totalCost,
-  //   so totalCost IS the net wealth lost. No extra subtraction.
-  // For Pure BV: residual sits in the BV; converting to personal would cost box 2 on extraction.
-  //   So personal wealth lost = totalCost (BV-side cost already personalized) PLUS the residual
-  //   you'd lose to box 2 if you wanted that car-value back personally. But to keep apples-to-apples
-  //   with other strategies, we report cost only (residual stays in BV; treat as a separate asset).
-  const netWealthCost = (s) => s.totalCost;
+  // True net wealth lost over the period — depends on path.
+  //
+  // Pure Private and Extension:
+  //   Depreciation inside totalCost already = (price − resale) / years × years = price − resale.
+  //   So totalCost = real cash out the door (purchase + running − resale).
+  //   The residualPersonal asset is what you sold the car for at the end — already counted INSIDE
+  //   totalCost via depreciation. Net wealth lost = totalCost.
+  //
+  // Pure BV:
+  //   The car's residual belongs to the BV, not directly to you. The BV has (separately) accumulated
+  //   the residual as an asset on its books. To get it personally, you'd dividend it out, losing
+  //   box 2 (residualPersonal already accounts for this haircut).
+  //   For apples-to-apples vs Private, we treat the BV residual as a recoverable asset that
+  //   reduces the personal wealth impact: net = totalCost − residualPersonal.
+  const netWealthCost = (s) => {
+    if (s.key === "bv") return s.totalCost - s.residualPersonal;
+    return s.totalCost;
+  };
   const anchorNet = netWealthCost(anchorStrat);
 
   // Build the universe of alternatives at typical prices (best-of-3 strategies per cell).
