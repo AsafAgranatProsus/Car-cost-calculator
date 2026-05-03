@@ -129,24 +129,35 @@ The buyout sweep frequently chooses `switchYear=1` for high-bijtelling non-EV ca
 - Private path: no `bvFactor`, all costs are direct.
 - Capital cost on Private: 4% (cash) opportunity OR 6% (loan) interest, charged on **average outstanding balance** `(price + resale)/2`. BV always uses 4% opportunity (as if cash had stayed in BV).
 
-## Stress-test invariants (must hold — verify if you change the model)
+## Audit invariants (83 checks, must hold)
 
-These are encoded in `/tmp/stress.mjs` (regenerate from this skill if lost):
+Encoded in [`audit.mjs`](./audit.mjs). Run with `node .cursor/skills/dga-car-tax-modeling/audit.mjs` before every deploy. **All 83 checks must pass.** If any fails, fix the model, not the test (unless a tax rule has primary-source-cited changed).
 
-1. **Box 1 brackets**: `box1Tax` matches piecewise-linear at all breakpoints.
-2. **30% ruling**: `taxableAfterRuling` cannot push taxable below €48,013 norm.
-3. **Marginal monotonicity**: at €60k bijtelling marginal = 37.56% regardless of ruling; at €120k = 49.50% regardless of ruling.
-4. **EV bijtelling lock-in**: 2022 reg → 16% on €35k cap; 2023–24 → 16% on €30k cap; 2025 → 17%; 2026 → 18%. Above cap always 22%.
-5. **MRB ratios**: EV ×0.70, PHEV ×1.25, Petrol/Hybrid ×1.00 of base.
-6. **Resale monotone-decreasing** in years.
-7. **Strategy ordering**: `findBestSwitchYear.totalCost ≤ min(PureBV.totalCost, PurePrivate.totalCost) + slack`.
-8. **Pseudo-eindheffing scope**: identical EV BV cost on/off; identical Private cost on/off; non-EV BV cost strictly higher when on.
-9. **Box 2 monotonicity**: higher box 2 → cheaper BV monthly (because `bvFactor` shrinks); Private unchanged.
-10. **Walk-away identities**: `bv.residualPersonal = endResale × (1−box2)`; `private.residualPersonal = endResale`; `extension.residualPersonal = phase2.endResale`.
-11. **Cost monotonicity**: ↑km → ↑cost; ↑price → ↑cost; ↑catalogue → ↑BV cost (no effect on Private).
-12. **Ruling toggle**: ruling on ≤ ruling off for BV (ruling can only help, never hurt).
+Categories covered:
+- **A** Tax brackets & 30% ruling math (8 checks)
+- **B** Scenario building consistency (6)
+- **C** Bijtelling rates incl. EV reg-year regimes (6)
+- **D** Cost engine identities — wealth conservation for Private (5)
+- **E** BV-segment identities — bvFactor / VPB / box 2 (5)
+- **F** Strategy results & monthly/total relationships (8)
+- **G** Monotonicity — km / price / years / catalogue / pseudo / ruling / highway / oil (16)
+- **H** Box 2 + cash retention modes (3)
+- **I** BV profit-at-risk toggle (2)
+- **J** Resale & depreciation identities, formula correctness (10)
+- **K** Capital cost on average balance for cash & loan modes (4)
+- **L** Edge cases: 1-year hold, EV reg-year transitions, lock expiry (6)
+- **M** Cross-strategy invariants (1)
+- **N** UI-state coherence (1, manual)
+- **O** Reproducibility of user-facing benchmarks (Tiguan, RAV4) (4)
 
-If a code change breaks any of these, fix the change, not the test.
+### Critical economic identities (the ones that broke things historically)
+
+These deserve their own callout because they were the source of past bugs:
+
+1. **Net wealth lost is path-dependent.** For Private and Extension, `netWealth = totalCost` (resale already netted by depreciation). For Pure BV, `netWealth = totalCost − residualPersonal` (BV residual is a recoverable asset). Do NOT use a single formula across paths.
+2. **EV lock-in expires after 60 months.** A 2020-reg EV is on standard 22% in 2026, NOT 16%. The model uses `CURRENT_YEAR = 2026` and falls through to 22% when `regYear + 5 ≤ CURRENT_YEAR`.
+3. **Wealth conservation for Private**: `totalCost = purchase + (running × years) + (MRB × years) + (opportunity × years) − resale`. If this drifts even by €1, depreciation is being mis-accounted.
+4. **bvFactor**: `(1 − effectiveVPB) × (1 − effectiveBox2)` where `effectiveVPB = bvProfitable ? 0.19 : 0` and `effectiveBox2 = retainMode ? 0 : box2Rate`.
 
 ## Recommendation patterns to surface in chat answers
 
@@ -164,7 +175,7 @@ When the user asks "what should I buy?" against this calculator, structure the a
 
 ## When extending the calculator
 
-- New tax rule: add to the "Verified 2026 NL tax parameters" section above WITH its source citation, then add a stress-test invariant for it before changing code.
+- New tax rule: add to the "Verified 2026 NL tax parameters" section above WITH its source citation, then add a check to `audit.mjs` for it BEFORE changing code.
 - New fuel/state/strategy: extend `FUELS` / `STATES` / strategy functions; ensure `findBestSwitchYear` and the matrix view both pick it up.
 - New parameter (e.g. insurance, BPM modelling): default it OFF for backward comparability, expose as a settings toggle, and add a methodology note.
 - The site is deployed via GitHub Actions on every push to `main`. Vite `base` is `/Car-cost-calculator/`. If repo is renamed, update `vite.config.js`.
