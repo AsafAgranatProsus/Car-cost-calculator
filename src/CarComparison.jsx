@@ -519,7 +519,14 @@ export default function CarComparison() {
 
   // Net wealth change = total paid out − residual personally retained.
   // This is the actual money you lose over the period.
-  const netWealthCost = (s) => s.totalCost - s.residualPersonal;
+  // True net wealth lost over the period.
+  // For Pure Private and Extension: depreciation already nets the residual inside totalCost,
+  //   so totalCost IS the net wealth lost. No extra subtraction.
+  // For Pure BV: residual sits in the BV; converting to personal would cost box 2 on extraction.
+  //   So personal wealth lost = totalCost (BV-side cost already personalized) PLUS the residual
+  //   you'd lose to box 2 if you wanted that car-value back personally. But to keep apples-to-apples
+  //   with other strategies, we report cost only (residual stays in BV; treat as a separate asset).
+  const netWealthCost = (s) => s.totalCost;
   const anchorNet = netWealthCost(anchorStrat);
 
   // Build the universe of alternatives at typical prices (best-of-3 strategies per cell).
@@ -623,7 +630,7 @@ export default function CarComparison() {
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 10, color: "#888", letterSpacing: 1, textTransform: "uppercase" }}>Net wealth lost</div>
               <div style={{ fontSize: 18, color: "#1abc9c", fontWeight: 900 }}>{fmt(anchorNet)}</div>
-              <div style={{ fontSize: 9, color: "#666" }}>= total − residual {fmt(anchorStrat.residualPersonal)}</div>
+              <div style={{ fontSize: 9, color: "#666" }}>residual {fmt(anchorStrat.residualPersonal)} returns to you on top</div>
             </div>
           </div>
 
@@ -689,7 +696,7 @@ export default function CarComparison() {
             </>
           )}
           <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
-            <strong style={{ color: "#aaa" }}>Net wealth lost</strong> = what you actually pay out over {holdYears} years − the personal-equivalent residual value you walk away with. For BV path, residual is clipped by box 2 ({Math.round((1-box2Rate)*100)}%) on extraction. <strong style={{ color: "#aaa" }}>Avg/mo</strong> ignores residual and overstates the gap between high- and low-residual options.
+            <strong style={{ color: "#aaa" }}>Net wealth lost</strong> = total real-money cost over {holdYears} years (purchase + running costs − resale at end). Depreciation already nets the resale, so this is an honest "I've lost this much" number. The residual cash returns to you on top of this — it's a separate asset, not a discount. For BV path, that residual sits inside the BV and would lose box 2 ({Math.round((1-box2Rate)*100)}%) if you extracted it personally.
           </div>
         </div>
 
@@ -1087,17 +1094,11 @@ export default function CarComparison() {
                   <td style={{ padding: "4px 8px", color: "#1abc9c", textAlign: "right", fontSize: 11 }}>{fmt(stratPureBV.residualPersonal)} <span style={{ color: "#666" }}>(after box 2)</span></td>
                   <td style={{ padding: "4px 8px", color: "#f1c40f", textAlign: "right", fontSize: 11 }}>{fmt(stratExt.residualPersonal)}</td>
                 </tr>
-                <tr>
-                  <td style={{ padding: "4px 8px", color: "#999", fontSize: 11 }}>Net 5-yr cost (what you really lose)</td>
-                  <td style={{ padding: "4px 8px", color: "#e67e22", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratPurePV.totalCost - stratPurePV.residualPersonal + stratPurePV.segments[0].endResale)}</td>
-                  <td style={{ padding: "4px 8px", color: "#1abc9c", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratPureBV.totalCost)}</td>
-                  <td style={{ padding: "4px 8px", color: "#f1c40f", textAlign: "right", fontSize: 11, fontWeight: 700 }}>{fmt(stratExt.totalCost)}</td>
-                </tr>
               </tbody>
             </table>
           </div>
           <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a0a14", borderRadius: 6, fontSize: 11, color: "#888", lineHeight: 1.6 }}>
-            "Net" cost is what you actually lose over the period: total paid minus the residual asset value you keep. For Pure BV, the residual is in the BV — extracting it via dividend costs you 1 − box 2 ({Math.round((1-box2Rate)*100)}%). The Buyout strategy avoids that hit.
+            <strong style={{ color: "#aaa" }}>Total = real wealth lost over the period.</strong> Depreciation already nets the residual: <code>(price − resale) / years</code>. The "End-of-period car value" row above shows what you walk away with on top of that — it's not subtracted again from total. For Pure BV, the residual sits inside the BV; converting it to personal cash would cost a further box 2 hit ({Math.round((1-box2Rate)*100)}%).
           </div>
         </div>
 
@@ -1182,7 +1183,7 @@ export default function CarComparison() {
                   const sc = buildScenario("petrol", r.state, r.price, { annualKm });
                   const s = strategyPurePrivate(sc, params, holdYears);
                   return { ...r, total: s.totalCost, residual: s.residualPersonal,
-                           net: s.totalCost - s.residualPersonal };
+                           net: s.totalCost };
                 });
                 const cheapest = Math.min(...rows.map(r => r.net));
                 return rows.map(r => {
